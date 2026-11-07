@@ -1,0 +1,9 @@
+dist/
+node_modules/
+private/
+History.js
+History.gs
+.clasp.json
+.clasprc.json
+*.local.*
+docs/screenshots/_page.html
