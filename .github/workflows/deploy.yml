@@ -1,0 +1,48 @@
+# Builds and tests on every push. On main, if the deploy secrets are set, it also pushes
+# the code to your Apps Script project and updates your web app.
+# Secrets: CLASPRC_JSON, SCRIPT_ID, DEPLOYMENT_ID. See docs/AUTO-DEPLOY.md.
+name: Test and deploy
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/build.mjs
+      - run: node test/server.test.js
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+      SCRIPT_ID: ${{ secrets.SCRIPT_ID }}
+      DEPLOYMENT_ID: ${{ secrets.DEPLOYMENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check deploy secrets
+        id: secrets
+        run: |
+          if [ -z "$CLASPRC_JSON" ] || [ -z "$SCRIPT_ID" ] || [ -z "$DEPLOYMENT_ID" ]; then
+            echo "Deploy secrets aren't set, so nothing is deployed. See docs/AUTO-DEPLOY.md."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Push to Apps Script and update the web app
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          node scripts/build.mjs
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+          printf '{"scriptId":"%s","rootDir":"dist"}' "$SCRIPT_ID" > .clasp.json
+          npx -y @google/clasp@2.4.2 push --force
+          npx -y @google/clasp@2.4.2 deploy --deploymentId "$DEPLOYMENT_ID" --description "GitHub ${GITHUB_SHA::7}"
+          rm -f ~/.clasprc.json
