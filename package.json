@@ -1,0 +1,13 @@
+{
+  "name": "sidequest",
+  "version": "1.0.0",
+  "description": "Tracks a tutoring side gig: classes from Google Calendar, weekly wages emails and payslips, checked against each other.",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/build.mjs && node test/server.test.js",
+    "screenshots": "node scripts/build.mjs && node scripts/screenshots.js",
+    "push": "node scripts/build.mjs && npx -y @google/clasp@2.4.2 push --force"
+  }
+}
