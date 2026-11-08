@@ -35,7 +35,7 @@ Mistakes slip in: a class left off a weekly email, half an hour paid instead of 
 
 | | |
 |---|---|
-| ![Lessons: a calendar week with classes in colour and other events in grey](docs/screenshots/lessons.png) | **Lessons.** Your week, laid out like Google Calendar. Classes are coloured by status: taught, needs notes, coming up. Lunch, lectures and everything else appear in grey. |
+| ![Calendar: a week with classes coloured by subject and other events in grey](docs/screenshots/lessons.png) | **Calendar.** Your week, laid out like Google Calendar. Each subject has its own colour; solid means done, an amber edge means it needs notes, a dashed outline means it's coming up. Lunch, lectures and everything else stay grey. |
 | ![Writing class notes with the student's earlier classes beside the form](docs/screenshots/class-notes.png) | **Class notes.** Mark a class taught, a no-show (half pay to start, editable) or cancelled, and write notes with the student's earlier classes on the right. Future classes just show when they start. |
 | ![Pay problems: an underpaid line and a missing item](docs/screenshots/pay-problems.png) | **Pay problems.** Only differences that affect your money. Each week has a ready-made email to admin. |
 | ![Payslips: every pay period against its payslip](docs/screenshots/payslips.png) | **Payslips.** Each pay period with what you logged, what the payslip says, tax refund, net and when it arrived. Open the PDF in one click. |

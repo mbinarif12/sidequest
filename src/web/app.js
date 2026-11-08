@@ -128,14 +128,15 @@ function packageAlerts() {
     .filter(x => x.p && x.p.left >= 0 && (x.p.lastDate ? x.p.lastDate <= L.addDays(TODAY, 7) : x.p.left <= 1));
 }
 // Package ending soon → two real, tickable to-dos (created once per package)
-let pkgSyncing = false;
+let pkgSyncing = false; const pkgMade = new Set(); // never create the same reminder twice, even before the Sheet answers
 async function ensurePackageTodos() {
   if (pkgSyncing || !loaded) return; pkgSyncing = true;
   for (const { s, p } of packageAlerts()) {
     const when = p.lastDate ? `last class ${fmtD(p.lastDate, { weekday: "short", day: "numeric", month: "short" })}` : p.left ? "1 lesson left" : "package finished";
     for (const [k, text] of [["exam", `Prepare an exam for ${s.name} (${s.subject.replace(/\s*\(H\)/, "")})`], ["report", `Write ${s.name}'s student report`]]) {
       const key = `${k}-${p.key}`;
-      if (!S.todos.some(t => t.key === key)) await save("todos", "auto-" + uid(), { text: `${text} · ${when}`, done: false, createdAt: new Date().toISOString(), key });
+      if (pkgMade.has(key) || S.todos.some(t => t.key === key)) continue;
+      pkgMade.add(key); await save("todos", "auto-" + uid(), { text: `${text} · ${when}`, done: false, createdAt: new Date().toISOString(), key });
     }
   }
   pkgSyncing = false;
@@ -143,7 +144,11 @@ async function ensurePackageTodos() {
 function todos() {
   const out = [];
   CAL.orphans.forEach(id => { const l = S.lessons.find(x => x.id === id); if (l) out.push({ id: "or-" + id, act: "open", lid: id, title: `${nameOf(l)}'s ${fmtD(l.date)} class is no longer in your calendar`, sub: "Was it cancelled or moved?", warn: true }); });
-  S.todos.filter(t => !t.done).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).forEach(t => out.push({ id: "my-" + t.id, act: "mine", tid: t.id, title: t.text, sub: "Your to-do" }));
+  const seenTodo = new Set();
+  S.todos.filter(t => !t.done).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))).forEach(t => {
+    const k = t.key || t.text.trim().toLowerCase(); if (seenTodo.has(k)) return; seenTodo.add(k); // each to-do shows once
+    out.push({ id: "my-" + t.id, act: "mine", tid: t.id, title: t.text, sub: t.key ? "Package ending" : "Your to-do" });
+  });
   S.lessons.filter(l => l.followups && !l.followupsDone).sort((a, b) => b.date.localeCompare(a.date))
     .forEach(l => out.push({ id: "fu-" + l.id, act: "fudone", lid: l.id, title: l.followups.split("\n")[0], sub: `${nameOf(l)} · ${fmtD(l.date)}` }));
   S.lessons.filter(l => l.kind === "class" && l.date <= TODAY && l.date >= L.addDays(TODAY, -21) && !l.topic && !l.notes)
@@ -161,7 +166,7 @@ function render() {
   const main = $("#main");
   if (loadErr) { main.innerHTML = `<div class="card empty">SideQuest couldn't read your Sheet. ${esc(loadErr)}<br><button class="btn" data-act="reload">Try again</button></div>`; return; }
   if (!loaded) { main.innerHTML = `<div class="loading"><div class="sk big"></div><div class="sk"></div><div class="sk"></div></div>`; return; }
-  main.innerHTML = ({ home: vHome, lessons: vLessons, payslips: vPayslips, claim: vClaim, profile: vProfile })[view]();
+  main.innerHTML = ({ home: vHome, lessons: vLessons, students: vStudents, payslips: vPayslips, claim: vClaim, profile: vProfile })[view]();
   applyTheme(); growAll(main);
   if (loaded) setTimeout(ensurePackageTodos, 0);
 }
@@ -224,23 +229,31 @@ function vHome() {
   <section class="card"><div class="row-b"><h2>Pay periods</h2><div class="muted small">Earned ${eur(earned)} · Paid ${eur(paid)} · <b class="ink">Owed ${eur(earned - paid)}</b></div></div>
     <div class="periods">${strip}</div></section>
   <section class="split3">
-    <div class="card"><div class="row-b"><h2>Coming up</h2><button class="link" data-act="nav" data-v="lessons">All lessons</button></div>
+    <div class="card"><div class="row-b"><h2>Coming up</h2><button class="link" data-act="nav" data-v="lessons">Open calendar</button></div>
       ${up.length ? up.map(p => { const s = stu(p.studentId); return `<div class="li"><div class="date"><span>${dow(p.date)}</span><b>${+p.date.slice(8)}</b></div><div class="grow"><b>${esc(s?.name)} · ${esc((s?.subject || "").replace(/\s*\(H\)/, ""))}</b><div class="muted small">${esc(p.time)} · ${hrs(p.hours)}${nextNumber(p.studentId) && s?.pkgSize ? ` · lesson ${nextNumber(p.studentId)} of ${s.pkgSize}` : ""}</div></div><div class="num b">${eur(L.round2(p.hours * rateFor("class", p.date, p.studentId)))}</div></div>`; }).join("")
         : `<p class="empty">${CAL.error ? "Connect your calendar to see upcoming lessons." : "Nothing in your calendar for the next two weeks."}</p>`}</div>
     <div class="card"><div class="row-b"><h2>To do</h2>${allTd.length > td.length ? `<span class="muted small">${allTd.length - td.length} more</span>` : ""}</div>
-      <form class="addtodo" data-form="todo"><label for="newtodo" class="sr">New to-do</label><input id="newtodo" placeholder="Add your own to-do, e.g. Make an exam for Sadhbh" autocomplete="off"><button class="btn" type="submit">Add</button></form>
+      <form class="addtodo" data-form="todo"><label for="newtodo" class="sr">New to-do</label><textarea id="newtodo" rows="1" placeholder="Add your own to-do, e.g. Make an exam for Sadhbh"></textarea><button class="btn" type="submit">Add</button></form>
       ${td.length ? td.map(t => `<div class="li">${t.act === "fudone" || t.act === "mine" ? `<input type="checkbox" aria-label="Done" data-act="${t.act === "mine" ? "minedone" : "fudone"}" data-lid="${esc(t.lid || "")}" data-tid="${esc(t.tid || "")}">` : `<span class="dot ${t.warn ? "warn" : ""}" aria-hidden="true"></span>`}<button class="todo grow" data-act="todo" data-t="${esc(t.act)}" data-lid="${esc(t.lid || "")}" data-sid="${esc(t.sid || "")}" data-pid="${esc(t.pid || "")}"><b>${esc(t.title)}</b><br><span class="muted small">${esc(t.sub)}</span></button></div>`).join("")
         : `<p class="empty">All done.</p>`}
       <p class="muted small">Comes from your own to-dos, your notes' "To do after class", classes still missing notes, and exam + report reminders when a package is ending.</p></div>
-  </section>
-  ${studentsCard()}`;
+  </section>`;
 }
 
 // ---- Lessons: a calendar week like Google Calendar ----
 const WEEKS = {}; // monday → {events, error, loading}
 const HOUR_PX = 52;
-const COLORS = ["c1", "c2", "c3", "c4", "c5", "c6"];
-const colorOf = sid => COLORS[Math.max(0, S.students.findIndex(s => s.id === sid)) % COLORS.length];
+// One colour per subject (Maths blue, Applied Maths green, others after that), the same everywhere
+const COLORS = ["c1", "c3", "c2", "c4", "c5", "c6"];
+const subjectKey = sub => String(sub || "").toLowerCase().replace(/\(h\)|\(o\)|\bg\d+\b|\b1v1\b|leaving cert|junior cycle/g, "").replace(/\bmath\b/g, "maths").replace(/\s+/g, " ").trim() || "other";
+const subjectName = sub => subjectKey(sub).replace(/\b\w/g, c => c.toUpperCase());
+function subjectColor(sub) {
+  const k = subjectKey(sub);
+  if (k === "maths") return "c1"; if (k.includes("applied")) return "c3";
+  const others = [...new Set(S.students.map(s => subjectKey(s.subject)).filter(x => x !== "maths" && !x.includes("applied")))].sort();
+  return COLORS[2 + (Math.max(0, others.indexOf(k)) % 4)];
+}
+const colorOf = sid => subjectColor(stu(sid)?.subject);
 const toMin = t => { const [h, m] = String(t || "0:0").split(":").map(Number); return h * 60 + (m || 0); };
 const fromMin = m => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 async function loadWeek(ws, force) {
@@ -288,9 +301,9 @@ function blockHtml(b, h0) {
   if (b.other) return `<div class="ev other" style="${pos}" title="${esc(b.title)}"><b>${esc(b.title)}</b><span>${tm}</span></div>`;
   const s = stu(b.studentId), l = b.lesson;
   const subj = esc((s?.subject || "").replace(/\s*\(H\)/, ""));
-  let state = "plan", note = "";
-  if (l) { state = l.kind === "cancelled" ? "cx" : (l.topic || l.notes || l.source === "history") ? "done" : "need"; note = l.kind === "cancelled" ? "Cancelled" : l.kind === "noshow" ? "No-show" : state === "need" ? "Add details" : "✓ Taught"; }
-  else if (hasStarted(b.planned)) { state = "need"; note = "Add details"; }
+  let state = "plan", note = "Coming up";
+  if (l) { state = l.kind === "cancelled" ? "cx" : (l.topic || l.notes || l.source === "history") ? "done" : "need"; note = l.kind === "cancelled" ? "Cancelled" : l.kind === "noshow" ? "✓ No-show" : state === "need" ? "✎ Add notes" : "✓ Done"; }
+  else if (hasStarted(b.planned)) { state = "need"; note = "✎ Add notes"; }
   const act = l ? `data-act="pick" data-lid="${l.id}"` : `data-act="pickplan" data-eid="${esc(b.planned.eventId)}"`;
   return `<button class="ev ${colorOf(b.studentId)} ${state}" style="${pos}" ${act}><b>${esc(s?.name || "?")} · ${subj}</b><span>${tm}${note ? " · " + note : ""}</span></button>`;
 }
@@ -303,6 +316,12 @@ function studentsCard() {
         <span class="muted small">${s.pkgSize ? `${d} of ${s.pkgSize} · ` : ""}${esc(s.subject.replace(/\s*\(H\)/, ""))}</span></button>`;
     }).join("")}</div>
   </section>`;
+}
+function vStudents() {
+  const inactive = S.students.filter(s => !s.active);
+  return `<div><h1>Students</h1><div class="muted">Click a student to see every class with your notes, or to change their details.</div></div>
+  ${studentsCard()}
+  ${inactive.length ? `<section class="card"><h2>Finished</h2><div class="studs">${inactive.map(s => `<button class="stud" data-act="student" data-sid="${s.id}"><b>${esc(s.name)}</b><span class="muted small">${esc(s.subject.replace(/\s*\(H\)/, ""))}</span></button>`).join("")}</div></section>` : ""}`;
 }
 function vLessons() {
   const we = L.addDays(weekStart, 6);
@@ -326,8 +345,8 @@ function vLessons() {
     </div></div></div>`;
   return `<div class="row-b"><div><h1>${title}</h1><div class="muted">${ls.length} class${ls.length === 1 ? "" : "es"} logged · ${hrs(sum(ls, l => +l.hours || 0))} · ${eur(sum(ls, L.amountOf))}${W.loading ? " · loading your calendar…" : W.error ? " · calendar not connected, showing usual times" : ""}</div></div>
     <div class="acts"><button class="btn" data-act="other">+ Other work</button><button class="btn sq" data-act="wk" data-n="-7" aria-label="Previous week">‹</button><button class="btn" data-act="wk" data-n="0">Today</button><button class="btn sq" data-act="wk" data-n="7" aria-label="Next week">›</button></div></div>
-  <section class="card flush">${grid}<div class="legend small muted"><span><i class="lg done"></i>Taught</span><span><i class="lg need"></i>Needs details</span><span><i class="lg plan"></i>Coming up</span><span><i class="lg other"></i>Other calendar events</span></div></section>
-  ${CAL.unmatched.length ? `<p class="muted small">Calendar events that aren't classes are shown in grey. If one of them is a class, open the student on Home and add a word from its title to their calendar keyword.</p>` : ""}`;
+  <section class="card flush">${grid}<div class="legend small muted"><span><i class="lg done c1"></i>Done</span><span><i class="lg need c1"></i>Taught, needs notes</span><span><i class="lg plan c1"></i>Coming up</span><span><i class="lg other"></i>Other events</span><span class="sep"></span>${[...new Set(S.students.filter(s => s.active).map(s => subjectKey(s.subject)))].map(k => { const s = S.students.find(x => subjectKey(x.subject) === k); return `<span><i class="lg done ${subjectColor(s.subject)}"></i>${esc(subjectName(s.subject))}</span>`; }).join("")}</div></section>
+  ${CAL.unmatched.length ? `<p class="muted small">Calendar events that aren't classes are shown in grey. If one of them is a class, open the student on the Students page and add a word from its title to their calendar keyword.</p>` : ""}`;
 }
 // A student's past classes, newest first, the way your Excel tabs show them
 function historyTable(sid, opts = {}) {
@@ -346,6 +365,7 @@ function panelModel() {
   if (!sel) return null;
   if (sel.lessonId) { const l = S.lessons.find(x => x.id === sel.lessonId); return l ? { ...l } : null; }
   if (sel.planned) { const p = sel.planned; return { studentId: p.studentId, date: p.date, time: p.time, hours: p.hours, rate: rateFor("class", p.date, p.studentId), kind: "", number: nextNumber(p.studentId), eventId: String(p.eventId).indexOf("slot-") === 0 ? "" : p.eventId, _new: true, _locked: !hasStarted(p) }; }
+  if (sel.fromLine) { const f = sel.fromLine; return { ...f, _new: true, _other: !f.studentId }; }
   if (sel.other) return { studentId: "", label: "", date: TODAY, time: "", hours: 1, rate: rateFor("meeting", TODAY), kind: "meeting", _new: true, _other: true };
   return null;
 }
@@ -364,15 +384,15 @@ function panel() {
   const status = isOther ? `<div class="f2">
       <label class="fld">Type<select id="p_kind">${OTHER_KINDS.map(k => `<option value="${k}" ${k === m.kind ? "selected" : ""}>${KINDS[k]}</option>`).join("")}</select></label>
       <label class="fld">Date<input id="p_date" type="date" value="${esc(m.date)}" max="${TODAY}"></label></div>
-      <label class="fld">Description<input id="p_label" value="${esc(m.label)}" placeholder="e.g. Parent-teacher meeting"></label>`
+      <label class="fld">Description<textarea id="p_label" rows="1" placeholder="e.g. Parent-teacher meeting">${esc(m.label)}</textarea></label>`
     : `<div class="seg" role="group" aria-label="What happened">${["class", "noshow", "cancelled"].map(k => `<button type="button" class="${(m.kind || "") === k ? "on" : ""}" data-act="kind" data-k="${k}">${KINDS[k]}</button>`).join("")}</div>`;
   const pay = `<details class="pay" ${isOther ? "open" : ""}><summary>Pay: ${hrs(m.kind === "cancelled" ? 0 : m.hours)} × ${eur(m.rate)} = <b>${eur(L.amountOf(m))}</b></summary>
     <div class="f3"><label class="fld">Hours<input id="p_hours" type="number" step="0.25" min="0" value="${esc(m.hours)}"></label><label class="fld">Rate €/h<input id="p_rate" type="number" step="0.5" min="0" value="${esc(m.rate)}"></label>${isOther ? "" : `<label class="fld">Lesson #<input id="p_num" type="number" min="0" value="${esc(m.number ?? "")}"></label>`}</div></details>`;
   const notes = isOther ? `<label class="fld">Notes<textarea id="p_notes" rows="3">${esc(m.notes)}</textarea></label>` : `
     <label class="fld">Topic covered<textarea id="p_topic" rows="2" placeholder="e.g. Ch 13: Differential Calculus">${esc(m.topic)}</textarea></label>
-    <label class="fld">Homework<input id="p_hw" value="${esc(m.homework)}" placeholder="e.g. Ex 13.4"></label>
+    <label class="fld">Homework<textarea id="p_hw" rows="1" placeholder="e.g. Ex 13.4">${esc(m.homework)}</textarea></label>
     <label class="fld">Notes<textarea id="p_notes" rows="4" placeholder="How did it go? What's next?">${esc(m.notes)}</textarea></label>
-    <label class="fld">To do after class<input id="p_fu" value="${esc(m.followups)}" placeholder="e.g. Send the notes"></label>`;
+    <label class="fld">To do after class<textarea id="p_fu" rows="1" placeholder="e.g. Send the notes">${esc(m.followups)}</textarea></label>`;
   const autoNote = sel.planned && sel.planned.started && !CAL.error ? `<p class="muted small">If you leave it, it's marked taught after it ends, but it only goes on your Payment Claim once you add details.</p>` : m.source === "calendar" && !m.topic && !m.notes && m.kind === "class" ? `<p class="muted small">Logged from your calendar. Add details to put it on your Payment Claim.</p>` : "";
   return `${head}${orphan}${status}${notes}${pay}${autoNote}
     <div class="acts end">${!m._new ? `<button class="btn ghost danger" data-act="dellesson" data-lid="${m.id}">Delete</button>` : ""}<button class="btn ghost" data-act="close">Cancel</button><button class="btn primary" data-act="savelesson">Save</button></div>`;
@@ -524,7 +544,7 @@ function issuesDlg() {
   const g = issues();
   openDlg(`<h2>Pay problems</h2><p class="muted small">Only things that change what you're paid are listed here.</p>
     ${g.length ? g.map(x => `<div class="grp"><div class="row-b"><b>${esc(x.title)}</b><span class="acts">${x.stmt ? `<button class="btn ghost" data-act="draft" data-id="${x.key}">Draft email</button><button class="btn ghost" data-act="sorted" data-id="${x.key}">Mark sorted</button>` : `<button class="btn ghost" data-act="slipok" data-pid="${x.slipId}">It's fine</button>`}</span></div>
-      <ul>${x.list.map(i => `<li>${i.date ? `<span class="muted">${fmtD(i.date)}</span> ` : ""}${esc(i.text)}${i.lessonId ? ` <button class="link" data-act="openlesson" data-lid="${i.lessonId}">Open lesson</button>` : ""}</li>`).join("")}</ul></div>`).join("") : `<p class="empty">Nothing to look at.</p>`}
+      <ul>${x.list.map(i => `<li>${i.date ? `<span class="muted">${fmtD(i.date)}</span> ` : ""}${esc(i.text)}${i.lessonId ? ` <button class="link" data-act="openlesson" data-lid="${i.lessonId}">Open lesson</button>` : ""}${i.line ? ` <button class="link" data-act="fromline" data-g="${esc(x.key)}" data-i="${x.list.indexOf(i)}">Add it to my lessons</button>` : ""}</li>`).join("")}</ul></div>`).join("") : `<p class="empty">Nothing to look at.</p>`}
     <div class="acts end"><button class="btn" data-act="close">Close</button></div>`);
 }
 function draftDlg(id) {
@@ -540,7 +560,7 @@ function studentDlg(s) {
       ${fld("s_n", "Name", s.name, "text", "required")}${fld("s_sub", "Subject", s.subject, "text", 'placeholder="G12 Maths (H)"')}${fld("s_k", "Calendar keyword", s.calKeyword ?? s.name, "text", 'placeholder="Word(s) in the calendar event title"')}
       ${fld("s_c", "Course code (admin's emails)", s.code, "text", 'placeholder="IE1042"')}${fld("s_h", "Usual lesson length (h)", s.hours ?? 1, "number", 'step="0.25" min="0"')}${fld("s_r", "Own rate €/h (optional)", s.ownRate, "number", 'step="0.5" min="0" placeholder="Uses your Profile rate"')}
       ${fld("s_p", "Package size (lessons)", s.pkgSize, "number", 'min="0"')}
-      <label class="fld span2">Notes<input id="s_notes" value="${esc(s.notes)}"></label>
+      <label class="fld span2">Notes<textarea id="s_notes" rows="1">${esc(s.notes)}</textarea></label>
       <label class="chk span3"><input type="checkbox" id="s_a" ${s.active !== false ? "checked" : ""}> Currently teaching</label>
     </form>
     <div class="acts end">${s.id ? `<button class="btn ghost danger" data-act="delstu" data-sid="${s.id}">Delete</button>` : ""}<button class="btn ghost" data-act="close">Cancel</button><button class="btn primary" data-act="savestu" data-sid="${s.id || ""}">Save</button></div>
@@ -580,6 +600,13 @@ document.addEventListener("click", async e => {
   if (a === "claimf") { claimFilter = D.k; return render(); }
   if (a === "period") { selPeriod = D.k; if (view !== "payslips") { view = "payslips"; scrollTo(0, 0); } return render(); }
   if (a === "wk") { weekStart = +D.n === 0 ? L.mondayOf(TODAY) : L.addDays(weekStart, +D.n); sel = null; panelKind = null; return render(); }
+  if (a === "fromline") {
+    const g = issues().find(x => x.key === D.g), it = g && g.list[+D.i]; if (!it) return;
+    const ln = it.line, looksOther = /meeting|parent|report|prep|trial/i.test(ln.label) || !it.studentId;
+    sel = { fromLine: { studentId: looksOther ? "" : it.studentId, date: ln.date, time: ln.time || "", hours: ln.hours, rate: ln.rate, kind: looksOther ? (/trial/i.test(ln.label) ? "demo" : "meeting") : "class",
+      label: looksOther ? ln.label.replace(/Lesson\(\d+\)-\d+\s*/, "").replace(/\b(IE\d+|T\d+)\b\s*/, "").trim() : "", number: looksOther ? null : ln.counter, notes: "Added from admin's weekly email." } };
+    panelKind = null; return openPanel();
+  }
   if (a === "pick") { sel = { lessonId: D.lid }; panelKind = null; return openPanel(); }
   if (a === "pickplan") { const b = weekBlocks(weekStart).blocks.find(x => x.planned && x.planned.eventId === D.eid); if (!b) return; sel = { planned: b.planned }; panelKind = null; return openPanel(); }
   if (a === "other") { sel = { other: true }; panelKind = null; return openPanel(); }
@@ -617,7 +644,11 @@ document.addEventListener("click", async e => {
     if (D.t === "mine") return;
   }
   if (a === "fudone") { const l = S.lessons.find(x => x.id === D.lid); return save("lessons", l.id, { ...strip(l), followupsDone: true }); }
-  if (a === "minedone") { const x = S.todos.find(y => y.id === D.tid); return save("todos", x.id, { ...strip(x), done: true }); }
+  if (a === "minedone") {
+    const x = S.todos.find(y => y.id === D.tid), k = x.key || x.text.trim().toLowerCase();
+    for (const y of S.todos.filter(y => !y.done && (y.key || y.text.trim().toLowerCase()) === k)) await save("todos", y.id, { ...strip(y), done: true });
+    return;
+  }
   if (a === "orphankeep") { const l = S.lessons.find(x => x.id === D.lid); CAL.orphans = CAL.orphans.filter(i => i !== l.id); dlg().close(); await save("lessons", l.id, { ...strip(l), eventId: "kept" }); return toast("Kept"); }
   if (a === "orphandel") { CAL.orphans = CAL.orphans.filter(i => i !== D.lid); sel = null; dlg().close(); await remove("lessons", D.lid); return toast("Removed"); }
   if (a === "theme") { PROFILE.theme = D.k; applyTheme(); t.parentElement.querySelectorAll("button").forEach(b => b.classList.toggle("on", b === t)); try { await gs("api_saveProfile", { theme: D.k }); } catch (er) { toast("Couldn't save the theme: " + (er.message || er)); } return; }
@@ -640,7 +671,7 @@ document.addEventListener("click", async e => {
   }
   if (a === "received") { const s = S.payslips.find(x => x.id === D.pid); await save("payslips", s.id, { ...strip(s), receivedDate: TODAY }); return toast("Marked as arrived today. Click Edit to change the date."); }
   if (a === "newslip") { const p = periods().find(x => x.key === (D.k || selPeriod)); return slipDlg({}, p); }
-  if (a === "findold") { t.disabled = true; t.textContent = "Searching your email…"; try { const r = await gs("api_findOldPayslips"); applyAll(r.data); toast(r.result.found ? `Found ${r.result.found} payslip PDF${r.result.found > 1 ? "s" : ""}: linked ${r.result.linked}, added ${r.result.added}.` : "No payslip PDFs found in your email.", 6000); } catch (er) { toast("Search failed: " + (er.message || er)); } t.disabled = false; t.textContent = "Find old payslip PDFs"; return; }
+  if (a === "findold") { t.disabled = true; t.textContent = "Searching your email…"; try { const r = await gs("api_findOldPayslips"); applyAll(r.data); toast(r.result.found ? `Found ${r.result.found} payslip PDF${r.result.found > 1 ? "s" : ""} in your email.${r.result.months.length ? " Added: " + r.result.months.join(", ") + "." : ""}${r.result.already.length ? " Already had: " + r.result.already.join(", ") + "." : ""}` : "No emails with a payslip PDF were found in this Gmail account.", 9000); } catch (er) { toast("Search failed: " + (er.message || er)); } t.disabled = false; t.textContent = "Find old payslip PDFs"; return; }
   if (a === "editslip") return slipDlg(S.payslips.find(x => x.id === D.pid));
   if (a === "reread") { t.disabled = true; t.textContent = "Reading…"; try { applyAll(await gs("api_rereadSlip", D.pid)); const p = S.payslips.find(x => x.id === D.pid); toast(p && !p.needsCheck ? "Read it: " + eur(p.gross) + " gross" : "Still couldn't read it. Type the amounts in instead."); } catch (er) { toast("Couldn't read it: " + (er.message || er)); } return; }
   if (a === "fillslip") {
@@ -681,6 +712,7 @@ document.addEventListener("submit", async e => {
   const i = $("#newtodo"), text = i.value.trim(); if (!text) return;
   await save("todos", "t-" + uid(), { text, done: false, createdAt: new Date().toISOString() }); toast("Added");
 });
+document.addEventListener("keydown", e => { if (e.target.id === "newtodo" && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.target.form.requestSubmit(); } });
 document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches("tr[data-act]")) e.target.click(); });
 document.addEventListener("input", e => {
   if (!e.target.closest("#panel") || !["p_hours", "p_rate"].includes(e.target.id)) return;

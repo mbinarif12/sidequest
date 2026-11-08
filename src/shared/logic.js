@@ -81,16 +81,25 @@ const L = (() => {
   function matchStatement(p, students, lessons) {
     const inWeek = lessons.filter(l => l.date >= p.week.start && l.date <= p.week.end && PAID_KINDS.includes(l.kind));
     const used = new Set();
-    const studentFor = line => {
-      if (line.code) { const s = students.find(s => s.code && s.code.toUpperCase() === line.code.toUpperCase()); if (s) return s; }
+    // Who a line is for. A course code is exact; otherwise the name, and when two students share a name
+    // (e.g. one person taking Maths and Applied Maths) every one of them is a candidate.
+    const subjWord = t => /appl/i.test(t) ? "applied" : /math/i.test(t) ? "maths" : "";
+    const candidatesFor = line => {
+      if (line.code) { const s = students.filter(s => s.code && s.code.toUpperCase() === line.code.toUpperCase()); if (s.length) return s; }
       const lab = line.label.toLowerCase();
-      return students.find(s => s.name && new RegExp(`\\b${s.name.toLowerCase()}\\b`).test(lab)) || null;
+      const byName = students.filter(s => s.name && new RegExp(`\\b${s.name.toLowerCase()}\\b`).test(lab));
+      if (byName.length < 2) return byName;
+      const sw = subjWord(line.label);
+      return byName.slice().sort((a, b) => (subjWord(b.subject) === sw) - (subjWord(a.subject) === sw)); // same subject first
     };
     const rows = p.lines.map(line => {
-      const st = studentFor(line);
-      let lesson = null;
-      if (st) lesson = inWeek.find(l => !used.has(l.id) && l.studentId === st.id && l.date === line.date);
-      if (!lesson) // one-offs (trials, demos) logged without a student: same date and hours
+      const cands = candidatesFor(line);
+      let lesson = null, st = cands[0] || null;
+      for (const c of cands) {
+        lesson = inWeek.find(l => !used.has(l.id) && l.studentId === c.id && l.date === line.date);
+        if (lesson) { st = c; break; }
+      }
+      if (!lesson) // one-offs (trials, demos, meetings) logged without a student: same date and hours
         lesson = inWeek.find(l => !used.has(l.id) && !l.studentId && l.date === line.date && cents(l.hours) === cents(line.hours))
           || inWeek.find(l => !used.has(l.id) && !l.studentId && l.date === line.date);
       if (lesson) used.add(lesson.id);
@@ -198,7 +207,7 @@ const L = (() => {
     ic.issues.filter(i => i.sev === "bad").forEach(i => out.push({ text: i.text }));
     m.rows.forEach(r => {
       const who = (r.student && r.student.name) || r.line.label.replace(/Lesson\(\d+\)-\d+\s*/, "").replace(/\b(IE\d+|T\d+)\b/, "").trim().slice(0, 40);
-      if (r.status === "extra") out.push({ date: r.line.date, text: `Admin paid ${who} (€${r.line.subtotal.toFixed(2)}) but it isn't in your lessons`, amount: r.line.subtotal });
+      if (r.status === "extra") out.push({ date: r.line.date, text: `Admin paid ${who} (€${r.line.subtotal.toFixed(2)}, ${r.line.hours} h × €${r.line.rate}) but it isn't in your lessons`, amount: r.line.subtotal, line: r.line, studentId: r.student ? r.student.id : "" });
       r.diffs.filter(d => d.sev === "bad").forEach(d => out.push({ date: r.line.date, text: `${who}: ${d.text}` }));
     });
     const nm = l => ((students.find(s => s.id === l.studentId) || {}).name) || l.label || "A lesson";
