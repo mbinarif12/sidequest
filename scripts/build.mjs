@@ -13,7 +13,9 @@ mkdirSync(out, { recursive: true });
 const logic = src("shared/logic.js").replace(/if \(typeof module !== "undefined"\) module\.exports = L;\n?/, "");
 writeFileSync(join(out, "Logic.js"), "// Shared checking logic (the same code runs in the web page).\n" + logic);
 writeFileSync(join(out, "Code.js"), src("server/Code.js"));
-writeFileSync(join(out, "Index.html"), src("web/shell.html").replace("/*LOGIC*/", () => logic).replace("/*APP*/", () => src("web/app.js")));
+// The page's code goes in as base64 (in 76-character lines) so Google's HtmlService can't change it in transit
+const code = Buffer.from(logic + "\n" + src("web/app.js"), "utf8").toString("base64").replace(/.{76}/g, "$&\n");
+writeFileSync(join(out, "Index.html"), src("web/shell.html").replace("/*CODE*/", () => "\n" + code + "\n"));
 copyFileSync(join(root, "src", "appsscript.json"), join(out, "appsscript.json"));
 // Your own history file stays on your computer (private/ is git-ignored)
 if (existsSync(join(root, "private", "History.js"))) copyFileSync(join(root, "private", "History.js"), join(out, "History.js"));

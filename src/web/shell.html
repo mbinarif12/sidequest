@@ -211,11 +211,18 @@ dialog ul { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: 
 <div id="toast" role="status" hidden></div>
 <script>
 // If anything goes wrong before the app starts, say so on the page instead of staying blank
-window.addEventListener("error", e => { const m = document.getElementById("main"); if (m) m.insertAdjacentHTML("afterbegin", '<div class="card" style="border-color:#B3261E"><b>SideQuest hit an error</b><span>' + String(e.message || e).replace(/[<>&]/g, "") + (e.lineno ? " (line " + e.lineno + ")" : "") + '</span><span class="muted small">Send this to whoever maintains your SideQuest.</span></div>'); });
+window.addEventListener("error", e => { const m = document.getElementById("main"); if (m) m.insertAdjacentHTML("afterbegin", '<div class="card" style="border-color:#B3261E"><b>SideQuest hit an error</b><span>' + String(e.message || e).replace(/[<>&]/g, "") + (e.lineno ? " (" + String(e.filename || "").split("/").pop() + " line " + e.lineno + ")" : "") + '</span><span class="muted small">Send this to whoever maintains your SideQuest.</span></div>'); });
 </script>
+<!-- The app's code is stored encoded so Google's page server can't alter it on the way to the browser -->
+<script type="text/plain" id="sq-src">/*CODE*/</script>
 <script>
-/*LOGIC*/
-/*APP*/
+(function () {
+  var b = atob(document.getElementById("sq-src").textContent.replace(/\s+/g, "")), u = new Uint8Array(b.length);
+  for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+  var s = document.createElement("script");
+  s.text = new TextDecoder().decode(u) + "\n//# sourceURL=sidequest-app.js";
+  document.body.appendChild(s);
+})();
 </script>
 </body>
 </html>
