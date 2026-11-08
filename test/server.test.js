@@ -85,6 +85,21 @@ assert(fo.found >= 1 && !fo.more && fo.already.includes("September")); T("old pa
 const bg = G.api_findOldPayslips();
 assert(bg.result && bg.result.found >= 1 && /^done/.test(bg.data.status.oldSearch)); T("the button searches straight away and keeps the result on the Payslips page");
 assert.strictEqual(JSON.stringify(G.L.parsePeriod("The payslip covers 5 weeks from 25 May to 28 June, you did 2 weeks", 2026)), JSON.stringify({ start: "2026-05-25", end: "2026-06-28" })); T("payslip email dates without a year (\"from 25 May to 28 June\") are understood");
+// Older payslip emails that were already processed once still get their PDF linked; a contract PDF is ignored
+messages.push(msg("m20", "Salary of August 2026", "Please find the payslip attached.", [pdf("Payslip 12 (31-08-2026).pdf")], "2026-09-08T10:00:00Z"));
+messages.push(msg("m21", "Contract", "Your payslip will come monthly. Contract attached.", [pdf("Signed - Employment Contract.pdf")], "2026-06-16T10:00:00Z"));
+G.upsert_("Payslips", { id: "slip-aug", periodStart: "2026-07-27", periodEnd: "2026-08-30", payDate: "2026-08-31", gross: 581.25, receivedDate: "2026-09-07", source: "history" });
+G.upsert_("Processed", { messageId: "m20", type: "payslip", result: "seen before" });
+const fo2 = G.api_findOldPayslips().result;
+const aug = G.readRows_("Payslips").find(p => p.id === "slip-aug");
+assert(aug.pdfUrl, "August got its PDF"); assert(fo2.months.includes("August payslip")); assert(!G.readRows_("Payslips").some(p => /Contract/.test(p.id))); assert(!fo2.months.some(x => /Contract/.test(x)));
+T("an older payslip email seen before still gets its PDF linked to the right month; contracts are ignored");
+// The number on the payslip is the employee number: a new month's payslip must not overwrite another month
+messages.push(msg("m22", "Salary of October 2026", "Please find the payslip attached.", [pdf("Payslip 12 (31-10-2026).pdf")], "2026-11-12T10:00:00Z"));
+G.runCheck();
+const oct = G.readRows_("Payslips").find(p => p.payDate === "2026-10-31");
+assert(oct && oct.id !== "slip-aug" && oct.periodEnd === "2026-10-25"); assert.strictEqual(G.readRows_("Payslips").find(p => p.periodEnd === "2026-09-27").payDate, "2026-09-30");
+T("a new month's payslip gets its own entry (October period) instead of overwriting another month");
 const P = G.L.buildPeriods("2026-09-01", "2026-11-20", [{ periodStart: "2026-08-31", periodEnd: "2026-09-27" }, { periodStart: "2026-09-28", periodEnd: "2026-11-01" }]);
 assert.strictEqual(P.find(p => p.name === "October").weeks, 5); assert.strictEqual(P.find(p => p.name === "November").start, "2026-11-02"); T("pay periods: a 5-week payslip moves the boundary, the rest follow");
 assert.strictEqual(G.L.periodFor("2026-10-31").name, "November"); T("pay periods: a week counts in the month its Sunday falls in");

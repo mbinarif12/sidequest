@@ -379,7 +379,7 @@ function handleMessage_(m) {
   if (p.lines.length) return handleWeekly_(m, p, body);
   // A payslip only counts when its PDF is attached
   const pdf = m.getAttachments({ includeInlineImages: false }).find(a => /pdf/i.test(a.getContentType()) || /\.pdf$/i.test(a.getName()));
-  if (pdf && /payslip/i.test(pdf.getName() + " " + body)) return handlePayslip_(m, body, pdf);
+  if (pdf && /payslip/i.test(pdf.getName())) return handlePayslip_(m, body, pdf); // the PDF itself must be a payslip (not a contract that mentions one)
   return { type: "other", result: "Not a wages email." };
 }
 
@@ -397,7 +397,7 @@ function handleWeekly_(m, p, body) {
 }
 
 function handlePayslip_(m, body, pdf) {
-  const period = L.parsePeriod(body);
+  let period = L.parsePeriod(body, m.getDate().getFullYear());
   const st = getSettings_();
   let parsed = {}, pdfUrl = "";
   const known = readRows_("Payslips").find(s => period && s.periodEnd === period.end && s.pdfUrl);
@@ -410,12 +410,17 @@ function handlePayslip_(m, body, pdf) {
     pdfUrl = saved.getUrl();
     try { const txt = pdfText_(pdf.copyBlob()); parsed = L.parsePayslip(txt, expectedGross_(period && period.start, period && period.end)); parsed.pdfText = txt.slice(0, 20000); } catch (e) { parsed = { pdfText: "Couldn't convert: " + e.message }; }
   }
+  // Match by period, else by pay date. (The number on a Sage payslip is your employee number: the same every month.)
   const slips = readRows_("Payslips");
+  const fm = pdf ? pdf.getName().match(/(\d{2})-(\d{2})-(\d{4})/) : null, payDate = (fm ? `${fm[3]}-${fm[2]}-${fm[1]}` : "") || parsed.payDate || ""; // the date in the file name is the most reliable
+  let old = slips.find(s => period && s.periodEnd === period.end) || slips.find(s => payDate && s.payDate === payDate)
+    || slips.find(s => payDate && s.payDate && s.payDate.slice(0, 7) === payDate.slice(0, 7));
+  if (!period && old && old.periodEnd) period = { start: old.periodStart, end: old.periodEnd };
+  if (!period && payDate) { const p = L.periodOfMonth(+payDate.slice(0, 4), +payDate.slice(5, 7) - 1); period = { start: p.start, end: p.end }; } // "Salary of August": the August period
   const periodEnd = period ? period.end : "";
-  const old = slips.find(s => (periodEnd && s.periodEnd === periodEnd) || (parsed.number && +s.number === +parsed.number));
   const slip = {
-    id: old ? old.id : "slip-" + (parsed.number || periodEnd || Utilities.getUuid().slice(0, 8)),
-    number: parsed.number, payDate: parsed.payDate, periodStart: period ? period.start : "", periodEnd,
+    id: old ? old.id : "slip-" + (periodEnd || Utilities.getUuid().slice(0, 8)),
+    number: null, payDate, periodStart: period ? period.start : "", periodEnd,
     gross: parsed.gross, net: parsed.net, cumulativeGross: parsed.cumulativeGross, paye: parsed.paye, usc: parsed.usc,
     receivedDate: "", pdfUrl, source: "email", pdfText: parsed.pdfText || "",
   };
@@ -438,7 +443,7 @@ function dedupeTodos_() {
 // Earlier versions mistook weekly emails that quote a payslip email for payslips. Remove those empty entries
 // and forget those emails, so the next check reads them again as weekly statements.
 function cleanupPayslips_() {
-  const bad = readRows_("Payslips").filter(p => p.source === "email" && !p.pdfUrl && p.gross == null);
+  const bad = readRows_("Payslips").filter(p => p.source === "email" && p.gross == null && (!p.pdfUrl || !p.periodEnd));
   bad.forEach(p => delete_("Payslips", p.id));
   const pr = readRows_("Processed").filter(r => r.type === "payslip" && /amounts not read yet/.test(r.result));
   pr.forEach(r => delete_("Processed", r.messageId));
@@ -450,6 +455,7 @@ function cleanupPayslips_() {
 // Works in batches (about 4 minutes each) without holding the app's lock; press the button again to carry on.
 function findOldPayslips_() {
   const started = Date.now(), budget = 4 * 60 * 1000; // web calls are limited to 6 minutes
+  withLock_(cleanupPayslips_);
   const st = getSettings_();
   const senders = String(st.senders || "").split(/[,\s]+/).filter(Boolean).map(s => s.toLowerCase());
   // Any email with a payslip PDF, whoever sent it (older payslips sometimes come from a different admin address)
@@ -466,7 +472,7 @@ function findOldPayslips_() {
       if (Date.now() - started > budget) { res.more = true; break; }
       try {
       const body = m.getPlainBody() || "";
-      const pdf = m.getAttachments({ includeInlineImages: false }).find(a => (/pdf/i.test(a.getContentType()) || /\.pdf$/i.test(a.getName())) && /payslip/i.test(a.getName() + " " + body));
+      const pdf = m.getAttachments({ includeInlineImages: false }).find(a => (/pdf/i.test(a.getContentType()) || /\.pdf$/i.test(a.getName())) && /payslip/i.test(a.getName()));
       if (!pdf) continue;
       res.found++;
       const period = L.parsePeriod(body, m.getDate().getFullYear());
@@ -476,7 +482,6 @@ function findOldPayslips_() {
         || slips.find(s => fileDate && s.payDate && s.payDate.slice(0, 7) === fileDate.slice(0, 7));
       const label = period ? L.periodName(period.start, period.end) : fileDate ? L.MONTHS[+fileDate.slice(5, 7) - 1] + " payslip" : pdf.getName();
       if (slip && slip.pdfUrl) { res.already.push(label); continue; }
-      if (checked.has(m.getId()) && slip) { res.already.push(label); continue; }
       // Only convert the PDF to text when the month is missing (or missing its amounts): it's the slow part
       let txt = "", parsed = {};
       if (!slip || slip.gross == null || slip.net == null) {
