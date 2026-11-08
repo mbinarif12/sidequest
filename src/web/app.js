@@ -427,6 +427,15 @@ function collectPanel() {
   return { id: m.id || (m.eventId ? "cal-" : "m-") + uid(), data: d };
 }
 
+// The last payslip search, so its result is visible even if the page was closed while it ran
+function searchLine() {
+  const s = STATUS.oldSearch || ""; if (!s) return "";
+  const [state, at, ...err] = s.split("|"), when = at ? new Date(at).toLocaleString("en-IE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+  if (state === "running") return `<div class="note soft">Searching your email for payslip PDFs (started ${when}). You can keep using SideQuest.</div>`;
+  if (state === "error") return `<div class="note bad">${ICON.alert}<span>The payslip search stopped (${when}): ${esc(err.join("|"))}</span></div>`;
+  let r = {}; try { r = JSON.parse(STATUS.oldSearchResult || "{}"); } catch (e) {}
+  return `<div class="note soft">Last payslip search (${when}): ${r.found ? `found ${r.found} payslip PDF${r.found > 1 ? "s" : ""}.${r.months && r.months.length ? " Added: " + esc(r.months.join(", ")) + "." : ""}${r.already && r.already.length ? " Already had: " + esc(r.already.join(", ")) + "." : ""}` : "no emails with a payslip PDF attached were found in this Gmail account."}</div>`;
+}
 function vPayslips() {
   const ps = periods().slice().reverse();
   if (!selPeriod || !ps.some(p => p.key === selPeriod)) selPeriod = (ps.find(p => p.status === "slip" || p.status === "paid") || ps[0] || {}).key;
@@ -437,6 +446,7 @@ function vPayslips() {
   const wk = S.statements.filter(s => s.week).sort((a, b) => b.week.start.localeCompare(a.week.start));
   const issByStmt = Object.fromEntries(issues().filter(g => g.stmt).map(g => [g.stmt.id, g.list.length]));
   return `<div class="row-b"><div><h1>Payslips</h1><div class="muted">Pay periods run Monday to the last Sunday of the month. Money arrives around the 15th of the next month.</div></div><span class="acts">${/^running/.test(STATUS.oldSearch || "") ? `<span class="pill due">Searching your email…</span>` : `<button class="btn ghost" data-act="findold">Find old payslip PDFs</button>`}<button class="btn" data-act="newslip">Add payslip</button></span></div>
+  ${searchLine()}
   <section class="split2 top">
     <div class="card flush grow2"><div class="tw"><table><thead><tr><th>Pay period</th><th class="r">You logged</th><th class="r">Payslip</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div></div>
     <aside class="card panel">${p ? slipPanel(p) : `<p class="empty">No pay periods yet.</p>`}</aside>
