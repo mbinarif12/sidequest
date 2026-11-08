@@ -1,6 +1,18 @@
 // ---- SideQuest web page: Home, Lessons, Payslips, Payment claim, Profile ----
 const S = { students: [], lessons: [], statements: [], payslips: [], todos: [] };
 const COLS = Object.keys(S);
+let STATUS = {}, searchPoll = null, searchWasRunning = false;
+// While the background payslip search runs, check every 20 s and say when it's done
+function watchSearch() {
+  const running = /^running/.test(STATUS.oldSearch || "");
+  if (running && !searchPoll) searchPoll = setInterval(async () => { try { applyAll(await gs("api_getAll")); } catch (e) {} }, 20000);
+  if (!running && searchPoll) { clearInterval(searchPoll); searchPoll = null; }
+  if (searchWasRunning && !running) {
+    if (/^error/.test(STATUS.oldSearch)) toast("The payslip search stopped: " + STATUS.oldSearch.split("|").slice(2).join("|"), 10000);
+    else { let r = {}; try { r = JSON.parse(STATUS.oldSearchResult || "{}"); } catch (e) {} toast(r.found ? `Payslip search done. Found ${r.found} payslip PDF${r.found > 1 ? "s" : ""}.${r.months && r.months.length ? " Added: " + r.months.join(", ") + "." : ""}${r.already && r.already.length ? " Already had: " + r.already.join(", ") + "." : ""}` : "Payslip search done: no payslip PDFs found in this Gmail account.", 12000); }
+  }
+  searchWasRunning = running;
+}
 let CAL = { planned: [], unmatched: [], orphans: [], error: "", created: 0 }, TODAY = "", lastRun = "", loaded = false, loadErr = "", PROFILE = {}, RATES = [], NOW = null;
 let view = "home", weekStart = "", sel = null, selPeriod = null;
 const KINDS = { class: "Taught", noshow: "No-show", cancelled: "Cancelled", demo: "Demo / trial", meeting: "Meeting", reports: "Student reports", prep: "Lesson prep", other: "Other work" };
@@ -23,7 +35,7 @@ const paidLessons = ls => ls.filter(l => l.kind !== "cancelled");
 // ---- Store: the Google Sheet through google.script.run ----
 const gs = (fn, ...a) => new Promise((res, rej) => google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...a));
 function applyAll(d) {
-  COLS.forEach(c => S[c] = d[c] || []); CAL = { orphans: [], ...(d.calendar || CAL) }; TODAY = d.today || TODAY; lastRun = d.lastRun || ""; PROFILE = d.profile || PROFILE; RATES = d.rates || RATES; NOW = d.now ? new Date(d.now) : new Date();
+  COLS.forEach(c => S[c] = d[c] || []); CAL = { orphans: [], ...(d.calendar || CAL) }; TODAY = d.today || TODAY; lastRun = d.lastRun || ""; PROFILE = d.profile || PROFILE; RATES = d.rates || RATES; STATUS = d.status || STATUS; watchSearch(); NOW = d.now ? new Date(d.now) : new Date();
   if (!weekStart) weekStart = L.mondayOf(TODAY);
   loaded = true; loadErr = ""; render();
   if (CAL.created) toast(`${CAL.created} class${CAL.created > 1 ? "es" : ""} logged from your calendar.`);
@@ -424,7 +436,7 @@ function vPayslips() {
     <td class="r num">${eur(x.logged)}</td><td class="r num b">${x.slip && x.slip.gross != null ? eur(x.slip.gross) : `<span class="muted">—</span>`}</td><td>${pill(c, t)}</td></tr>`; }).join("");
   const wk = S.statements.filter(s => s.week).sort((a, b) => b.week.start.localeCompare(a.week.start));
   const issByStmt = Object.fromEntries(issues().filter(g => g.stmt).map(g => [g.stmt.id, g.list.length]));
-  return `<div class="row-b"><div><h1>Payslips</h1><div class="muted">Pay periods run Monday to the last Sunday of the month. Money arrives around the 15th of the next month.</div></div><span class="acts"><button class="btn ghost" data-act="findold">Find old payslip PDFs</button><button class="btn" data-act="newslip">Add payslip</button></span></div>
+  return `<div class="row-b"><div><h1>Payslips</h1><div class="muted">Pay periods run Monday to the last Sunday of the month. Money arrives around the 15th of the next month.</div></div><span class="acts">${/^running/.test(STATUS.oldSearch || "") ? `<span class="pill due">Searching your email…</span>` : `<button class="btn ghost" data-act="findold">Find old payslip PDFs</button>`}<button class="btn" data-act="newslip">Add payslip</button></span></div>
   <section class="split2 top">
     <div class="card flush grow2"><div class="tw"><table><thead><tr><th>Pay period</th><th class="r">You logged</th><th class="r">Payslip</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div></div>
     <aside class="card panel">${p ? slipPanel(p) : `<p class="empty">No pay periods yet.</p>`}</aside>
@@ -671,7 +683,12 @@ document.addEventListener("click", async e => {
   }
   if (a === "received") { const s = S.payslips.find(x => x.id === D.pid); await save("payslips", s.id, { ...strip(s), receivedDate: TODAY }); return toast("Marked as arrived today. Click Edit to change the date."); }
   if (a === "newslip") { const p = periods().find(x => x.key === (D.k || selPeriod)); return slipDlg({}, p); }
-  if (a === "findold") { t.disabled = true; t.textContent = "Searching your email…"; try { const r = await gs("api_findOldPayslips"); applyAll(r.data); toast(r.result.found ? `Found ${r.result.found} payslip PDF${r.result.found > 1 ? "s" : ""} in your email.${r.result.months.length ? " Added: " + r.result.months.join(", ") + "." : ""}${r.result.already.length ? " Already had: " + r.result.already.join(", ") + "." : ""}${r.result.more ? " There are more: press the button again to carry on." : ""}` : "No emails with a payslip PDF were found in this Gmail account.", 12000); } catch (er) { toast("Search failed: " + (er.message || er)); } t.disabled = false; t.textContent = "Find old payslip PDFs"; return; }
+  if (a === "findold") {
+    t.disabled = true;
+    try { const r = await gs("api_findOldPayslips"); applyAll(r.data); toast(r.started ? "Searching your email in the background. You can keep using SideQuest or close it; you'll see the result here." : "A search is already running.", 7000); }
+    catch (er) { toast("Couldn't start the search: " + (er.message || er)); }
+    t.disabled = false; return;
+  }
   if (a === "editslip") return slipDlg(S.payslips.find(x => x.id === D.pid));
   if (a === "reread") { t.disabled = true; t.textContent = "Reading…"; try { applyAll(await gs("api_rereadSlip", D.pid)); const p = S.payslips.find(x => x.id === D.pid); toast(p && !p.needsCheck ? "Read it: " + eur(p.gross) + " gross" : "Still couldn't read it. Type the amounts in instead."); } catch (er) { toast("Couldn't read it: " + (er.message || er)); } return; }
   if (a === "fillslip") {

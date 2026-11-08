@@ -3,6 +3,7 @@
 const fs = require("fs"), vm = require("vm"), assert = require("assert"), path = require("path");
 const dist = path.join(__dirname, "..", "dist");
 const T = s => console.log("✓ " + s);
+const made = [];
 const demo = require("./demo.js");
 
 // ---- Fake spreadsheet ----
@@ -42,18 +43,18 @@ const fmt = (d, tz, f) => { const z = n => String(n).padStart(2, "0"); const Y =
   return f === "HH:mm" ? `${h}:${m}` : f === "yyyy-MM-dd" ? `${Y}-${M}-${D}` : `${Y}-${M}-${D} ${h}:${m}`; };
 const ctx = {
   console, SpreadsheetApp: { getActive: () => ({ getSheetByName: n => sheets[n] || null, insertSheet: n => (sheets[n] = makeSheet()), getSheets: () => Object.values(sheets), deleteSheet() {} }), getUi: () => ({}) },
-  GmailApp: { search: () => [{ getMessages: () => messages }] },
+  GmailApp: { search: () => [{ getId: () => "t1", getMessages: () => messages }] },
   CalendarApp: { getDefaultCalendar: () => ({ getEvents: (a, b) => events.filter(e => e.getStartTime() >= a && e.getStartTime() < b) }), getCalendarById: () => null },
   MailApp: { sendEmail() {} }, Session: { getEffectiveUser: () => ({ getEmail: () => "alex@example.com" }) },
   LockService: { getScriptLock: () => ({ waitLock() {}, tryLock: () => true, releaseLock() {} }) },
   Utilities: { formatDate: fmt, getUuid: () => Math.random().toString(16).slice(2) },
-  ScriptApp: { getProjectTriggers: () => [], deleteTrigger() {}, WeekDay: { MONDAY: 1, TUESDAY: 2 }, newTrigger: () => { const t = { timeBased: () => t, onWeekDay: () => t, atHour: () => t, inTimezone: () => t, create() {} }; return t; }, getService: () => ({ getUrl: () => "" }) },
+  ScriptApp: { getProjectTriggers: () => [], deleteTrigger() {}, WeekDay: { MONDAY: 1, TUESDAY: 2 }, newTrigger: h => { const t = { timeBased: () => t, onWeekDay: () => t, atHour: () => t, inTimezone: () => t, after: () => t, create() { made.push(h); } }; return t; }, getService: () => ({ getUrl: () => "" }) },
   DriveApp: { getFoldersByName: () => ({ hasNext: () => false }), createFolder: () => ({ createFile: () => ({ getUrl: () => "https://drive.google.com/file/d/X/view" }) }), getFileById: () => ({ setTrashed() {}, getBlob: () => ({}) }) },
   Drive: { Files: { create: () => ({ id: "d" }) } }, DocumentApp: { openById: () => ({ getBody: () => ({ getText: () => slipText }) }) }, MimeType: { GOOGLE_DOCS: "doc" },
 };
 vm.createContext(ctx);
 vm.runInContext(["Logic.js", "Code.js"].map(f => fs.readFileSync(path.join(dist, f), "utf8")).join("\n") +
-  "\nthis.__ = { setup, runCheck, api_getAll, api_save, api_week, findOldPayslips_, setSetting_, readRows_, upsert_, L };", ctx);
+  "\nthis.__ = { setup, runCheck, api_getAll, api_save, api_week, findOldPayslips_, api_findOldPayslips, oldPayslipsJob, setSetting_, readRows_, upsert_, L };", ctx);
 const G = ctx.__;
 
 G.setup();
@@ -81,6 +82,9 @@ assert(!iss.some(i => /Row 3|lesson count/.test(i.text))); T("weekly email: cosm
 
 const fo = G.findOldPayslips_();
 assert(fo.found >= 1 && !fo.more && fo.already.includes("September")); T("old payslip search runs without blocking and reports months it already has");
+const bg = G.api_findOldPayslips();
+assert(bg.started && made.includes("oldPayslipsJob") && /^running/.test(bg.data.status.oldSearch)); G.oldPayslipsJob();
+const done = G.api_getAll().status; assert(/^done/.test(done.oldSearch) && JSON.parse(done.oldSearchResult).found >= 1); T("the button starts the search in the background and reports when it's done");
 const P = G.L.buildPeriods("2026-09-01", "2026-11-20", [{ periodStart: "2026-08-31", periodEnd: "2026-09-27" }, { periodStart: "2026-09-28", periodEnd: "2026-11-01" }]);
 assert.strictEqual(P.find(p => p.name === "October").weeks, 5); assert.strictEqual(P.find(p => p.name === "November").start, "2026-11-02"); T("pay periods: a 5-week payslip moves the boundary, the rest follow");
 assert.strictEqual(G.L.periodFor("2026-10-31").name, "November"); T("pay periods: a week counts in the month its Sunday falls in");
