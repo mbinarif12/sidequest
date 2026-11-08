@@ -83,8 +83,8 @@ assert(!iss.some(i => /Row 3|lesson count/.test(i.text))); T("weekly email: cosm
 const fo = G.findOldPayslips_();
 assert(fo.found >= 1 && !fo.more && fo.already.includes("September")); T("old payslip search runs without blocking and reports months it already has");
 const bg = G.api_findOldPayslips();
-assert(bg.started && made.includes("oldPayslipsJob") && /^running/.test(bg.data.status.oldSearch)); G.oldPayslipsJob();
-const done = G.api_getAll().status; assert(/^done/.test(done.oldSearch) && JSON.parse(done.oldSearchResult).found >= 1); T("the button starts the search in the background and reports when it's done");
+assert(bg.result && bg.result.found >= 1 && /^done/.test(bg.data.status.oldSearch)); T("the button searches straight away and keeps the result on the Payslips page");
+assert.strictEqual(JSON.stringify(G.L.parsePeriod("The payslip covers 5 weeks from 25 May to 28 June, you did 2 weeks", 2026)), JSON.stringify({ start: "2026-05-25", end: "2026-06-28" })); T("payslip email dates without a year (\"from 25 May to 28 June\") are understood");
 const P = G.L.buildPeriods("2026-09-01", "2026-11-20", [{ periodStart: "2026-08-31", periodEnd: "2026-09-27" }, { periodStart: "2026-09-28", periodEnd: "2026-11-01" }]);
 assert.strictEqual(P.find(p => p.name === "October").weeks, 5); assert.strictEqual(P.find(p => p.name === "November").start, "2026-11-02"); T("pay periods: a 5-week payslip moves the boundary, the rest follow");
 assert.strictEqual(G.L.periodFor("2026-10-31").name, "November"); T("pay periods: a week counts in the month its Sunday falls in");
