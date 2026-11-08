@@ -84,6 +84,7 @@ function setup() {
   ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === "runCheck").forEach(t => ScriptApp.deleteTrigger(t));
   [ScriptApp.WeekDay.MONDAY, ScriptApp.WeekDay.TUESDAY].forEach(d =>
     ScriptApp.newTrigger("runCheck").timeBased().onWeekDay(d).atHour(9).inTimezone(TZ).create());
+  dedupeTodos_();
   const removed = cleanupPayslips_();
   if (!getSettings_().oldPayslipsSearched) { try { findOldPayslips_(); } catch (e) {} }
   if (removed) { try { runCheck(); } catch (e) {} } // re-read those emails as weekly statements
@@ -189,6 +190,9 @@ function api_getAll() {
   const cal = withLock_(syncCalendar_);
   const st = getSettings_(), profile = {};
   PROFILE_KEYS.forEach(k => profile[k] = st[k] || "");
+  const todos = readRows_("Todos");
+  const keys = todos.filter(t => !t.done).map(t => t.key || String(t.text).trim().toLowerCase());
+  if (new Set(keys).size < keys.length) withLock_(dedupeTodos_);
   return { ...all_(), todos: readRows_("Todos"), lastRun: st.lastRun || "", today: today_(), now: new Date().toISOString(), calendar: cal, profile, rates: rates_() };
 }
 function api_saveProfile(p) {
@@ -420,6 +424,12 @@ function handlePayslip_(m, body, pdf) {
   };
 }
 
+// Earlier versions could create the same package reminder many times. Keep the first of each.
+function dedupeTodos_() {
+  const seen = {}, rows = readRows_("Todos").sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  rows.forEach(t => { const k = (t.key || String(t.text).trim().toLowerCase()) + (t.done ? "|done" : ""); if (seen[k]) delete_("Todos", t.id); else seen[k] = 1; });
+}
+
 // Earlier versions mistook weekly emails that quote a payslip email for payslips. Remove those empty entries
 // and forget those emails, so the next check reads them again as weekly statements.
 function cleanupPayslips_() {
@@ -434,12 +444,12 @@ function cleanupPayslips_() {
 function findOldPayslips_() {
   const st = getSettings_();
   const senders = String(st.senders || "").split(/[,\s]+/).filter(Boolean).map(s => s.toLowerCase());
-  if (!senders.length) return { found: 0, linked: 0, added: 0 };
-  const q = "(" + senders.map(s => "from:" + s).join(" OR ") + ") has:attachment filename:pdf";
-  const res = { found: 0, linked: 0, added: 0 };
+  // Any email with a payslip PDF, whoever sent it (older payslips sometimes come from a different admin address)
+  const q = "has:attachment filename:pdf (payslip" + senders.map(s => " OR from:" + s).join("") + ")";
+  const res = { found: 0, linked: 0, added: 0, months: [], already: [] };
   const done = {};
-  GmailApp.search(q, 0, 200).forEach(th => th.getMessages().forEach(m => {
-    if (done[m.getId()] || !senders.some(s => m.getFrom().toLowerCase().indexOf(s) >= 0)) return;
+  GmailApp.search(q, 0, 300).forEach(th => th.getMessages().forEach(m => {
+    if (done[m.getId()]) return;
     done[m.getId()] = 1;
     const body = m.getPlainBody() || "";
     const pdf = m.getAttachments({ includeInlineImages: false }).find(a => (/pdf/i.test(a.getContentType()) || /\.pdf$/i.test(a.getName())) && /payslip/i.test(a.getName() + " " + body));
@@ -453,7 +463,9 @@ function findOldPayslips_() {
     const slips = readRows_("Payslips");
     const slip = slips.find(s => period && s.periodEnd === period.end) || slips.find(s => payDate && s.payDate === payDate)
       || slips.find(s => payDate && s.payDate && s.payDate.slice(0, 7) === payDate.slice(0, 7));
-    if (slip && slip.pdfUrl) return;
+    const label = period ? L.periodName(period.start, period.end) : payDate ? L.MONTHS[+payDate.slice(5, 7) - 1] + " (paid)" : pdf.getName();
+    if (slip && slip.pdfUrl) { res.already.push(label); return; }
+    res.months.push(label);
     if (!slip) { handlePayslip_(m, body, pdf); res.added++; upsert_("Processed", { messageId: m.getId(), date: Utilities.formatDate(m.getDate(), TZ, "yyyy-MM-dd HH:mm"), subject: m.getSubject(), type: "payslip", result: "Found by the old-payslips search." }); return; }
     const folderName = st.payslipFolder || "SideQuest payslips";
     const it = DriveApp.getFoldersByName(folderName);

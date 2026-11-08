@@ -82,4 +82,12 @@ assert(!iss.some(i => /Row 3|lesson count/.test(i.text))); T("weekly email: cosm
 const P = G.L.buildPeriods("2026-09-01", "2026-11-20", [{ periodStart: "2026-08-31", periodEnd: "2026-09-27" }, { periodStart: "2026-09-28", periodEnd: "2026-11-01" }]);
 assert.strictEqual(P.find(p => p.name === "October").weeks, 5); assert.strictEqual(P.find(p => p.name === "November").start, "2026-11-02"); T("pay periods: a 5-week payslip moves the boundary, the rest follow");
 assert.strictEqual(G.L.periodFor("2026-10-31").name, "November"); T("pay periods: a week counts in the month its Sunday falls in");
+// Same student taking two subjects: admin's line has a course code SideQuest doesn't know yet
+{
+  const st2 = [{ id: "ella-m", name: "Ella", subject: "G12 Maths (H)", code: "IE5001" }, { id: "ella-a", name: "Ella", subject: "G12 Applied Maths (H)", code: "" }];
+  const ls2 = [{ id: "x1", studentId: "ella-a", date: "2026-11-01", hours: 1, rate: 35, kind: "class" }, { id: "x2", studentId: "ella-a", date: "2026-11-01", hours: 1, rate: 35, kind: "class" }];
+  const ln = n => ({ row: n, label: `Lesson(20)-${n} IE5002 Ella 1v1G12AppliedMaths 1v1 Class`, code: "IE5002", date: "2026-11-01", hours: 1, rate: 35, subtotal: 35, duration: 1 });
+  assert.strictEqual(G.L.moneyIssues({ week: { start: "2026-10-26", end: "2026-11-01" }, lines: [ln(1), ln(2)] }, st2, ls2).length, 0);
+  T("a student taking two subjects: admin's lines match the right subject, no false problems");
+}
 console.log("\nall server checks pass");
