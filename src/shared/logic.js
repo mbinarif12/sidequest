@@ -85,12 +85,12 @@ const L = (() => {
     // (e.g. one person taking Maths and Applied Maths) every one of them is a candidate.
     const subjWord = t => /appl/i.test(t) ? "applied" : /math/i.test(t) ? "maths" : "";
     const candidatesFor = line => {
-      if (line.code) { const s = students.filter(s => s.code && s.code.toUpperCase() === line.code.toUpperCase()); if (s.length) return s; }
-      const lab = line.label.toLowerCase();
-      const byName = students.filter(s => s.name && new RegExp(`\\b${s.name.toLowerCase()}\\b`).test(lab));
-      if (byName.length < 2) return byName;
-      const sw = subjWord(line.label);
-      return byName.slice().sort((a, b) => (subjWord(b.subject) === sw) - (subjWord(a.subject) === sw)); // same subject first
+      // Course code first, then everyone with that name (same subject first): admin sometimes puts the wrong code on a line
+      const byCode = line.code ? students.filter(s => s.code && s.code.toUpperCase() === line.code.toUpperCase()) : [];
+      const lab = line.label.toLowerCase(), sw = subjWord(line.label);
+      const byName = students.filter(s => s.name && new RegExp(`\\b${s.name.toLowerCase()}\\b`).test(lab) && !byCode.includes(s))
+        .sort((a, b) => (subjWord(b.subject) === sw) - (subjWord(a.subject) === sw));
+      return byCode.concat(byName);
     };
     const rows = p.lines.map(line => {
       const cands = candidatesFor(line);
@@ -207,7 +207,7 @@ const L = (() => {
     ic.issues.filter(i => i.sev === "bad").forEach(i => out.push({ text: i.text }));
     m.rows.forEach(r => {
       const who = (r.student && r.student.name) || r.line.label.replace(/Lesson\(\d+\)-\d+\s*/, "").replace(/\b(IE\d+|T\d+)\b/, "").trim().slice(0, 40);
-      if (r.status === "extra") out.push({ date: r.line.date, text: `Admin paid ${who} (€${r.line.subtotal.toFixed(2)}, ${r.line.hours} h × €${r.line.rate}) but it isn't in your lessons`, amount: r.line.subtotal, line: r.line, studentId: r.student ? r.student.id : "" });
+      if (r.status === "extra") out.push({ date: r.line.date, text: `Admin paid ${who} (€${r.line.subtotal.toFixed(2)}, ${r.line.hours} h × €${r.line.rate}${r.line.code ? ", code " + r.line.code : ""}) but it isn't in your lessons`, amount: r.line.subtotal, line: r.line, studentId: r.student ? r.student.id : "" });
       r.diffs.filter(d => d.sev === "bad").forEach(d => out.push({ date: r.line.date, text: `${who}: ${d.text}` }));
     });
     const nm = l => ((students.find(s => s.id === l.studentId) || {}).name) || l.label || "A lesson";

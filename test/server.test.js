@@ -89,5 +89,8 @@ assert.strictEqual(G.L.periodFor("2026-10-31").name, "November"); T("pay periods
   const ln = n => ({ row: n, label: `Lesson(20)-${n} IE5002 Ella 1v1G12AppliedMaths 1v1 Class`, code: "IE5002", date: "2026-11-01", hours: 1, rate: 35, subtotal: 35, duration: 1 });
   assert.strictEqual(G.L.moneyIssues({ week: { start: "2026-10-26", end: "2026-11-01" }, lines: [ln(1), ln(2)] }, st2, ls2).length, 0);
   T("a student taking two subjects: admin's lines match the right subject, no false problems");
+  const wrongCode = n => ({ ...ln(n), code: "IE5001", label: `Lesson(20)-${n} IE5001 Ella 1v1G12AppliedMaths 1v1 Class` });
+  assert.strictEqual(G.L.moneyIssues({ week: { start: "2026-10-26", end: "2026-11-01" }, lines: [wrongCode(1), wrongCode(2)] }, st2, ls2).length, 0);
+  T("…even when admin puts the other subject's course code on the line");
 }
 console.log("\nall server checks pass");
