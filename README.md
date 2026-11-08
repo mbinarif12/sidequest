@@ -28,6 +28,7 @@ Mistakes slip in: a class left off a weekly email, half an hour paid instead of 
 - **Knows the pay calendar.** Pay periods run Monday to the last Sunday of each month (4 or 5 weeks) and money arrives around the 15th of the next month. If a payslip states different dates, those win.
 - **Drafts the email to admin** when something doesn't match. You copy it; nothing is sent for you.
 - **Keeps your teaching notes** (topic, homework, remarks) with each student's full history beside you while you write.
+- **Keeps your to-dos**, including the ones you've ticked off, so you can look back at what you finished and when.
 - **Builds your payment claim**: every class, its status (paid, payslip in, not yet paid) and which payment it belongs to, ready to copy into Excel or an email.
 - **Reminds you when a package ends**: a week before a student's last booked class, you get "Prepare an exam" and "Write the student report" to-dos.
 
@@ -62,22 +63,17 @@ Everything is stored as plain tabs in a Google Sheet you own: Students, Lessons,
 
 **The three-way check.** Each line on a weekly email is matched to a logged class by course code and date (falling back to the student's name). Each payslip's gross is compared with the classes in its pay period and with that period's weekly emails. Only differences in hours, rate or amount count as problems.
 
-## Install (about 15 minutes)
+## Install (about 10 minutes, no coding)
 
-You need a Google account. The weekly-email reader expects the table format used by GoMappEd-style wages emails (`Number · Lesson Name · Course Name · … · Subtotal · Teacher`, ending in a `Total` line), and the payslip reader is tuned to Sage Payroll payslips. Other formats need small changes in `src/shared/logic.js`.
+**👉 [Step-by-step install guide](docs/INSTALL.md)**
 
-1. **Make the Sheet.** Go to [sheets.new](https://sheets.new) and name it *SideQuest*.
-2. **Open the script editor.** In the Sheet: *Extensions → Apps Script*. In *Project Settings*, tick **Show "appsscript.json" manifest file**.
-3. **Add the code.** Either:
-   - **By hand:** run `npm run build` (or download the files from a release), then create `Code.gs`, `Logic.gs` and an HTML file `Index`, and paste in `dist/Code.js`, `dist/Logic.js`, `dist/Index.html` and `dist/appsscript.json`; or
-   - **Automatically:** follow [docs/AUTO-DEPLOY.md](docs/AUTO-DEPLOY.md) so every push to GitHub updates your app.
-4. **Run setup.** Pick `setup` in the function menu and press ▶ Run. Approve the permissions (Google warns the app isn't verified, because it's your own script: *Advanced → Go to SideQuest → Allow*). This creates the tabs and the Monday/Tuesday 9am email checks.
-5. **Publish the web app.** *Deploy → New deployment → Web app*, with *Execute as: Me* and *Who has access: Only myself*. Bookmark the URL.
-6. **Fill in Profile.** Your name, rates, and the address your wages emails come from. Then add your students on Home (name, subject, course code, package size).
+In short: download 3 files, paste them into a new Google Sheet's Apps Script editor, press *Run*, and publish it as a private web app. The guide shows exactly where to click and what you should see after each step.
+
+The weekly-email reader expects GoMappEd-style wages emails (`Number · Lesson Name · Course Name · … · Subtotal · Teacher`, ending in a `Total` line), and the payslip reader is tuned to Sage Payroll payslips. Other formats need small changes in `src/shared/logic.js`.
 
 ### Bringing in your history
 
-If you've been tracking classes elsewhere, put them in a `History.js` file in a `private/` folder. It is git-ignored and never goes on GitHub. The build adds it to `dist/`; then run **SideQuest → Import history** once.
+If you've been tracking classes elsewhere, put them in a `History.js` file in a `private/` folder. It is git-ignored and never goes on GitHub. The build adds it to `dist/`; then run **SideQuest → Import history** once. (This is for developers building from source.)
 
 ```js
 const HISTORY_LESSONS = [
@@ -98,8 +94,8 @@ Older payslip PDFs are found with **Payslips → Find old payslip PDFs**, which 
 ## Development
 
 ```bash
-npm run build         # src/ → dist/ (Code.js, Logic.js, Index.html, appsscript.json)
-npm test              # runs the Apps Script code in Node against fake Google services
+npm run build         # src/ → dist/ (for clasp) and release/ (the 3 files in each GitHub Release)
+npm test              # runs the Apps Script code in Node against fake Google services (both dist/ and the single Code.gs)
 npm run screenshots   # regenerates docs/screenshots with invented demo data (needs Playwright)
 ```
 

@@ -19,4 +19,10 @@ writeFileSync(join(out, "Index.html"), src("web/shell.html").replace("/*CODE*/",
 copyFileSync(join(root, "src", "appsscript.json"), join(out, "appsscript.json"));
 // Your own history file stays on your computer (private/ is git-ignored)
 if (existsSync(join(root, "private", "History.js"))) copyFileSync(join(root, "private", "History.js"), join(out, "History.js"));
-console.log("Built dist/: Code.js, Logic.js, Index.html, appsscript.json");
+// Ready-to-paste files for people installing by hand (attached to each GitHub Release): Code.gs holds everything server-side
+const rel = join(root, "release");
+rmSync(rel, { recursive: true, force: true }); mkdirSync(rel, { recursive: true });
+writeFileSync(join(rel, "Code.gs"), src("server/Code.js") + "\n\n// ---- Shared checking logic ----\n" + logic);
+copyFileSync(join(out, "Index.html"), join(rel, "Index.html"));
+copyFileSync(join(out, "appsscript.json"), join(rel, "appsscript.json"));
+console.log("Built dist/ (Code.js, Logic.js, Index.html, appsscript.json) and release/ (Code.gs, Index.html, appsscript.json)");

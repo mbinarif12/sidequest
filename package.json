@@ -6,7 +6,7 @@
   "license": "MIT",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node scripts/build.mjs && node test/server.test.js",
+    "test": "node scripts/build.mjs && node test/server.test.js && SQ_RELEASE=1 node test/server.test.js",
     "screenshots": "node scripts/build.mjs && node scripts/screenshots.js",
     "push": "node scripts/build.mjs && npx -y @google/clasp@2.4.2 push --force"
   }

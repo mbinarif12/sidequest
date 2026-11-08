@@ -15,6 +15,7 @@ jobs:
           node-version: 20
       - run: node scripts/build.mjs
       - run: node test/server.test.js
+      - run: SQ_RELEASE=1 node test/server.test.js
   deploy:
     needs: test
     if: github.ref == 'refs/heads/main'
@@ -46,3 +47,25 @@ jobs:
           npx -y @google/clasp@2.4.2 push --force
           npx -y @google/clasp@2.4.2 deploy --deploymentId "$DEPLOYMENT_ID" --description "GitHub ${GITHUB_SHA::7}"
           rm -f ~/.clasprc.json
+  release:
+    # Publishes the 3 ready-to-paste files for people installing by hand (see docs/INSTALL.md)
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/build.mjs
+      - name: Replace the "latest" release with the new files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag -y || true
+          gh release create latest release/Code.gs release/Index.html release/appsscript.json \
+            --title "SideQuest (latest)" \
+            --notes "The 3 files to paste into Apps Script. Installing or updating? Follow docs/INSTALL.md. Built from ${GITHUB_SHA::7}." \
+            --target "$GITHUB_SHA" --latest
