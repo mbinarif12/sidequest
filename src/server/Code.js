@@ -35,6 +35,7 @@ const DEFAULT_SETTINGS = () => [
   ["lastRun", "", "Filled in automatically."],
 ];
 const PROFILE_KEYS = ["teacherName", "adminName", "email", "subjects", "photo", "theme", "senders", "emailSummary", "calendarId", "autoLog"];
+const STATUS_KEYS = ["oldSearch", "oldSearchResult"];
 
 // ---------- Menu & web page ----------
 function onOpen() {
@@ -193,10 +194,11 @@ function api_getAll() {
   const cal = withLock_(syncCalendar_);
   const st = getSettings_(), profile = {};
   PROFILE_KEYS.forEach(k => profile[k] = st[k] || "");
+  const status = {}; STATUS_KEYS.forEach(k => status[k] = st[k] || "");
   const todos = readRows_("Todos");
   const keys = todos.filter(t => !t.done).map(t => t.key || String(t.text).trim().toLowerCase());
   if (new Set(keys).size < keys.length) withLock_(dedupeTodos_);
-  return { ...all_(), todos: readRows_("Todos"), lastRun: st.lastRun || "", today: today_(), now: new Date().toISOString(), calendar: cal, profile, rates: rates_() };
+  return { ...all_(), todos: readRows_("Todos"), lastRun: st.lastRun || "", today: today_(), now: new Date().toISOString(), calendar: cal, profile, rates: rates_(), status };
 }
 function api_saveProfile(p) {
   if (p.photo && String(p.photo).length > 48000) throw new Error("That photo is too big. Try a smaller picture.");
@@ -451,11 +453,13 @@ function findOldPayslips_() {
   const st = getSettings_();
   const senders = String(st.senders || "").split(/[,\s]+/).filter(Boolean).map(s => s.toLowerCase());
   // Any email with a payslip PDF, whoever sent it (older payslips sometimes come from a different admin address)
-  const q = "has:attachment filename:pdf (payslip" + senders.map(s => " OR from:" + s).join("") + ")";
+  // Only emails whose attachment is called "payslip…", plus PDFs from your wages senders. Narrow = fast.
+  const queries = ["has:attachment filename:payslip"].concat(senders.length ? ["has:attachment filename:pdf (" + senders.map(s => "from:" + s).join(" OR ") + ")"] : []);
   const res = { found: 0, linked: 0, added: 0, months: [], already: [], more: false };
   const checked = new Set(readRows_("Processed").filter(r => r.type === "oldslip" || r.type === "payslip").map(r => r.messageId));
   const done = {};
-  const threads = GmailApp.search(q, 0, 300);
+  const seenTh = {}, threads = [];
+  queries.forEach(q => GmailApp.search(q, 0, 200).forEach(th => { if (!seenTh[th.getId()]) { seenTh[th.getId()] = 1; threads.push(th); } }));
   for (const th of threads) {
     for (const m of th.getMessages()) {
       if (done[m.getId()]) continue; done[m.getId()] = 1;
@@ -502,9 +506,24 @@ function findOldPayslips_() {
   if (!res.more) setSetting_("oldPayslipsSearched", new Date().toISOString());
   return res;
 }
+// The button starts the search in the background on Google's side, so you can keep using the app or close it.
 function api_findOldPayslips() {
-  const r = findOldPayslips_(); // no lock here: it takes a while and only locks for each save
-  return { result: r, data: api_getAll() };
+  const st = getSettings_().oldSearch || "";
+  if (/^running/.test(st) && Date.now() - Date.parse(st.split("|")[1]) < 15 * 60 * 1000) return { started: false, data: api_getAll() };
+  setSetting_("oldSearch", "running|" + new Date().toISOString());
+  ScriptApp.newTrigger("oldPayslipsJob").timeBased().after(1000).create();
+  return { started: true, data: api_getAll() };
+}
+function oldPayslipsJob() {
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === "oldPayslipsJob").forEach(t => ScriptApp.deleteTrigger(t));
+  let r;
+  try { r = findOldPayslips_(); } catch (e) { setSetting_("oldSearch", "error|" + new Date().toISOString() + "|" + e.message); return; }
+  const prev = (() => { try { return JSON.parse(getSettings_().oldSearchResult || "{}"); } catch (e) { return {}; } })();
+  const keep = /^running/.test(getSettings_().oldSearch || "") && prev.partial ? prev : { found: 0, months: [], already: [] };
+  const merged = { found: (keep.found || 0) + r.found, months: [...new Set([...(keep.months || []), ...r.months])], already: [...new Set([...(keep.already || []), ...r.already])], partial: r.more };
+  setSetting_("oldSearchResult", JSON.stringify(merged));
+  if (r.more) { setSetting_("oldSearch", "running|" + new Date().toISOString()); ScriptApp.newTrigger("oldPayslipsJob").timeBased().after(1000).create(); }
+  else setSetting_("oldSearch", "done|" + new Date().toISOString());
 }
 function menuFindOldPayslips() { const r = findOldPayslips_(); SpreadsheetApp.getUi().alert(`Found ${r.found} payslip PDF${r.found === 1 ? "" : "s"} in your email. Added: ${r.months.join(", ") || "none"}. Already had: ${r.already.join(", ") || "none"}.${r.more ? " There's more: run it again to carry on." : ""}`); }
 
