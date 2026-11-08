@@ -114,6 +114,21 @@ const L = (() => {
       const status = !lesson ? "extra" : diffs.some(d => d.sev === "bad") ? "diff" : diffs.length ? "note" : "ok";
       return { line, student: st, lesson, diffs, status };
     });
+    // A double lesson logged as one (e.g. 2 h) can stand for several of admin's lines (two 1 h lessons)
+    rows.filter(r => r.status === "extra").forEach(r => {
+      const cands = candidatesFor(r.line).map(c => c.id);
+      const host = rows.find(q => q.lesson && q !== r && q.lesson.date === r.line.date && cands.includes(q.lesson.studentId)
+        && cents(q.lesson.hours) > cents((q.mergedHours || q.line.hours)) && cents((q.mergedHours || q.line.hours) + r.line.hours) <= cents(q.lesson.hours));
+      if (!host) return;
+      host.mergedHours = round2((host.mergedHours || host.line.hours) + r.line.hours);
+      r.lesson = host.lesson; r.student = host.student; r.status = "ok"; r.diffs = []; r.mergedInto = host.line.row;
+      if (cents(host.mergedHours) === cents(host.lesson.hours)) {
+        const paid = rows.filter(x => x === host || x.mergedInto === host.line.row).reduce((a, x) => a + x.line.subtotal, 0);
+        host.diffs = host.diffs.filter(d => !/^(hours|amount)/.test(d.text));
+        if (cents(paid) !== cents(amountOf(host.lesson))) host.diffs.push({ sev: "bad", text: `amount: you logged €${amountOf(host.lesson).toFixed(2)}, admin paid €${paid.toFixed(2)} across ${rows.filter(x => x.mergedInto === host.line.row).length + 1} lines` });
+        host.status = host.diffs.some(d => d.sev === "bad") ? "diff" : host.diffs.length ? "note" : "ok";
+      }
+    });
     const missing = inWeek.filter(l => !used.has(l.id) && amountOf(l) > 0);
     const owedPerLog = round2(inWeek.reduce((a, l) => a + amountOf(l), 0));
     return { rows, missing, owedPerLog };

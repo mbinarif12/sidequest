@@ -94,5 +94,11 @@ assert.strictEqual(G.L.periodFor("2026-10-31").name, "November"); T("pay periods
   const wrongCode = n => ({ ...ln(n), code: "IE5001", label: `Lesson(20)-${n} IE5001 Ella 1v1G12AppliedMaths 1v1 Class` });
   assert.strictEqual(G.L.moneyIssues({ week: { start: "2026-10-26", end: "2026-11-01" }, lines: [wrongCode(1), wrongCode(2)] }, st2, ls2).length, 0);
   T("…even when admin puts the other subject's course code on the line");
+  const dbl = [{ id: "d1", studentId: "ella-a", date: "2026-11-01", hours: 2, rate: 35, kind: "class" }];
+  assert.strictEqual(G.L.moneyIssues({ week: { start: "2026-10-26", end: "2026-11-01" }, lines: [ln(1), ln(2)] }, st2, dbl).length, 0);
+  T("a double lesson logged as one 2-hour class matches admin's two 1-hour lines");
+  const dbl2 = [{ id: "d1", studentId: "ella-a", date: "2026-11-01", hours: 2, rate: 35, kind: "class" }];
+  assert.strictEqual(G.L.moneyIssues({ week: { start: "2026-10-26", end: "2026-11-01" }, lines: [ln(1)] }, st2, dbl2).length, 1);
+  T("…but if admin only paid one of the two hours, that's still flagged");
 }
 console.log("\nall server checks pass");
