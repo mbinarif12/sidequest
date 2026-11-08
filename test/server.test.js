@@ -45,7 +45,7 @@ const ctx = {
   GmailApp: { search: () => [{ getMessages: () => messages }] },
   CalendarApp: { getDefaultCalendar: () => ({ getEvents: (a, b) => events.filter(e => e.getStartTime() >= a && e.getStartTime() < b) }), getCalendarById: () => null },
   MailApp: { sendEmail() {} }, Session: { getEffectiveUser: () => ({ getEmail: () => "alex@example.com" }) },
-  LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
+  LockService: { getScriptLock: () => ({ waitLock() {}, tryLock: () => true, releaseLock() {} }) },
   Utilities: { formatDate: fmt, getUuid: () => Math.random().toString(16).slice(2) },
   ScriptApp: { getProjectTriggers: () => [], deleteTrigger() {}, WeekDay: { MONDAY: 1, TUESDAY: 2 }, newTrigger: () => { const t = { timeBased: () => t, onWeekDay: () => t, atHour: () => t, inTimezone: () => t, create() {} }; return t; }, getService: () => ({ getUrl: () => "" }) },
   DriveApp: { getFoldersByName: () => ({ hasNext: () => false }), createFolder: () => ({ createFile: () => ({ getUrl: () => "https://drive.google.com/file/d/X/view" }) }), getFileById: () => ({ setTrashed() {}, getBlob: () => ({}) }) },
@@ -79,6 +79,8 @@ const iss = G.L.moneyIssues({ week: st.week, lines: st.lines, totalHours: st.tot
 assert(iss.some(i => /Darragh: hours: you logged 1 h, admin paid 0.5 h/.test(i.text)), JSON.stringify(iss)); T("weekly email: the underpaid line (Darragh, 0.5 h instead of 1 h) is caught");
 assert(!iss.some(i => /Row 3|lesson count/.test(i.text))); T("weekly email: cosmetic glitches (missing row number, lesson counters) are not reported as pay problems");
 
+const fo = G.findOldPayslips_();
+assert(fo.found >= 1 && !fo.more && fo.already.includes("September")); T("old payslip search runs without blocking and reports months it already has");
 const P = G.L.buildPeriods("2026-09-01", "2026-11-20", [{ periodStart: "2026-08-31", periodEnd: "2026-09-27" }, { periodStart: "2026-09-28", periodEnd: "2026-11-01" }]);
 assert.strictEqual(P.find(p => p.name === "October").weeks, 5); assert.strictEqual(P.find(p => p.name === "November").start, "2026-11-02"); T("pay periods: a 5-week payslip moves the boundary, the rest follow");
 assert.strictEqual(G.L.periodFor("2026-10-31").name, "November"); T("pay periods: a week counts in the month its Sunday falls in");

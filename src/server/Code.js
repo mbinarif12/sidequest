@@ -86,7 +86,6 @@ function setup() {
     ScriptApp.newTrigger("runCheck").timeBased().onWeekDay(d).atHour(9).inTimezone(TZ).create());
   dedupeTodos_();
   const removed = cleanupPayslips_();
-  if (!getSettings_().oldPayslipsSearched) { try { findOldPayslips_(); } catch (e) {} }
   if (removed) { try { runCheck(); } catch (e) {} } // re-read those emails as weekly statements
   readRows_("Payslips").filter(p => p.needsCheck && p.pdfUrl).forEach(p => { try { rereadSlip_(p); } catch (e) {} });
   return "Set up done. Emails are checked on Mondays and Tuesdays between 9 and 10am, and your calendar whenever you open SideQuest.";
@@ -185,7 +184,11 @@ function all_() {
 }
 
 // ---------- API used by the web page ----------
-function withLock_(fn) { const l = LockService.getScriptLock(); l.waitLock(25000); try { return fn(); } finally { l.releaseLock(); } }
+function withLock_(fn) {
+  const l = LockService.getScriptLock();
+  if (!l.tryLock(28000)) throw new Error("SideQuest is busy with another task (an email check or search). Try again in a minute.");
+  try { return fn(); } finally { l.releaseLock(); }
+}
 function api_getAll() {
   const cal = withLock_(syncCalendar_);
   const st = getSettings_(), profile = {};
@@ -441,48 +444,69 @@ function cleanupPayslips_() {
 }
 
 // One-time search of ALL past wages emails for payslip PDFs, so older months get their PDF too.
+// Search ALL past emails for payslip PDFs, so older months get their PDF too.
+// Works in batches (about 4 minutes each) without holding the app's lock; press the button again to carry on.
 function findOldPayslips_() {
+  const started = Date.now(), budget = 4 * 60 * 1000;
   const st = getSettings_();
   const senders = String(st.senders || "").split(/[,\s]+/).filter(Boolean).map(s => s.toLowerCase());
   // Any email with a payslip PDF, whoever sent it (older payslips sometimes come from a different admin address)
   const q = "has:attachment filename:pdf (payslip" + senders.map(s => " OR from:" + s).join("") + ")";
-  const res = { found: 0, linked: 0, added: 0, months: [], already: [] };
+  const res = { found: 0, linked: 0, added: 0, months: [], already: [], more: false };
+  const checked = new Set(readRows_("Processed").filter(r => r.type === "oldslip" || r.type === "payslip").map(r => r.messageId));
   const done = {};
-  GmailApp.search(q, 0, 300).forEach(th => th.getMessages().forEach(m => {
-    if (done[m.getId()]) return;
-    done[m.getId()] = 1;
-    const body = m.getPlainBody() || "";
-    const pdf = m.getAttachments({ includeInlineImages: false }).find(a => (/pdf/i.test(a.getContentType()) || /\.pdf$/i.test(a.getName())) && /payslip/i.test(a.getName() + " " + body));
-    if (!pdf) return;
-    res.found++;
-    const period = L.parsePeriod(body);
-    const fm = pdf.getName().match(/(\d{2})-(\d{2})-(\d{4})/), fileDate = fm ? `${fm[3]}-${fm[2]}-${fm[1]}` : "";
-    let txt = ""; try { txt = pdfText_(pdf.copyBlob()); } catch (e) {}
-    const parsed = L.parsePayslip(txt, period ? expectedGross_(period.start, period.end) : null);
-    const payDate = parsed.payDate || fileDate;
-    const slips = readRows_("Payslips");
-    const slip = slips.find(s => period && s.periodEnd === period.end) || slips.find(s => payDate && s.payDate === payDate)
-      || slips.find(s => payDate && s.payDate && s.payDate.slice(0, 7) === payDate.slice(0, 7));
-    const label = period ? L.periodName(period.start, period.end) : payDate ? L.MONTHS[+payDate.slice(5, 7) - 1] + " (paid)" : pdf.getName();
-    if (slip && slip.pdfUrl) { res.already.push(label); return; }
-    res.months.push(label);
-    if (!slip) { handlePayslip_(m, body, pdf); res.added++; upsert_("Processed", { messageId: m.getId(), date: Utilities.formatDate(m.getDate(), TZ, "yyyy-MM-dd HH:mm"), subject: m.getSubject(), type: "payslip", result: "Found by the old-payslips search." }); return; }
-    const folderName = st.payslipFolder || "SideQuest payslips";
-    const it = DriveApp.getFoldersByName(folderName);
-    const folder = it.hasNext() ? it.next() : DriveApp.createFolder(folderName);
-    const upd = { ...slip, pdfUrl: folder.createFile(pdf.copyBlob().setName(pdf.getName())).getUrl(), pdfText: txt.slice(0, 20000) };
-    if (!upd.payDate && payDate) upd.payDate = payDate;
-    ["net", "cumulativeGross", "paye", "usc"].forEach(k => { if ((upd[k] == null || upd[k] === "") && parsed[k] != null) upd[k] = parsed[k]; });
-    if (upd.gross == null && parsed.gross != null) upd.gross = parsed.gross;
-    if (period && !upd.periodStart) upd.periodStart = period.start;
-    upd.needsCheck = upd.gross == null;
-    upsert_("Payslips", upd); res.linked++;
-  }));
-  setSetting_("oldPayslipsSearched", new Date().toISOString());
+  const threads = GmailApp.search(q, 0, 300);
+  for (const th of threads) {
+    for (const m of th.getMessages()) {
+      if (done[m.getId()]) continue; done[m.getId()] = 1;
+      if (Date.now() - started > budget) { res.more = true; break; }
+      const body = m.getPlainBody() || "";
+      const pdf = m.getAttachments({ includeInlineImages: false }).find(a => (/pdf/i.test(a.getContentType()) || /\.pdf$/i.test(a.getName())) && /payslip/i.test(a.getName() + " " + body));
+      if (!pdf) continue;
+      res.found++;
+      const period = L.parsePeriod(body);
+      const fm = pdf.getName().match(/(\d{2})-(\d{2})-(\d{4})/), fileDate = fm ? `${fm[3]}-${fm[2]}-${fm[1]}` : "";
+      const slips = readRows_("Payslips");
+      let slip = slips.find(s => period && s.periodEnd === period.end) || slips.find(s => fileDate && s.payDate === fileDate)
+        || slips.find(s => fileDate && s.payDate && s.payDate.slice(0, 7) === fileDate.slice(0, 7));
+      const label = period ? L.periodName(period.start, period.end) : fileDate ? L.MONTHS[+fileDate.slice(5, 7) - 1] + " payslip" : pdf.getName();
+      if (slip && slip.pdfUrl) { res.already.push(label); continue; }
+      if (checked.has(m.getId()) && slip) { res.already.push(label); continue; }
+      // Only convert the PDF to text when the month is missing (or missing its amounts): it's the slow part
+      let txt = "", parsed = {};
+      if (!slip || slip.gross == null || slip.net == null) {
+        try { txt = pdfText_(pdf.copyBlob()); parsed = L.parsePayslip(txt, period ? expectedGross_(period.start, period.end) : null); } catch (e) {}
+        if (!slip && parsed.payDate) slip = slips.find(s => s.payDate === parsed.payDate);
+      }
+      res.months.push(label);
+      withLock_(() => {
+        if (!slip) { handlePayslip_(m, body, pdf); res.added++; }
+        else {
+          const folderName = st.payslipFolder || "SideQuest payslips";
+          const it = DriveApp.getFoldersByName(folderName);
+          const folder = it.hasNext() ? it.next() : DriveApp.createFolder(folderName);
+          const upd = { ...slip, pdfUrl: folder.createFile(pdf.copyBlob().setName(pdf.getName())).getUrl() };
+          if (txt) upd.pdfText = txt.slice(0, 20000);
+          const payDate = parsed.payDate || fileDate;
+          if (!upd.payDate && payDate) upd.payDate = payDate;
+          ["gross", "net", "cumulativeGross", "paye", "usc"].forEach(k => { if ((upd[k] == null || upd[k] === "") && parsed[k] != null) upd[k] = parsed[k]; });
+          if (period && !upd.periodStart) upd.periodStart = period.start;
+          upd.needsCheck = upd.gross == null;
+          upsert_("Payslips", upd); res.linked++;
+        }
+        upsert_("Processed", { messageId: m.getId(), date: Utilities.formatDate(m.getDate(), TZ, "yyyy-MM-dd HH:mm"), subject: m.getSubject(), type: "oldslip", result: "Payslip PDF found: " + label });
+      });
+    }
+    if (res.more) break;
+  }
+  if (!res.more) setSetting_("oldPayslipsSearched", new Date().toISOString());
   return res;
 }
-function api_findOldPayslips() { const r = withLock_(findOldPayslips_); return { result: r, data: api_getAll() }; }
-function menuFindOldPayslips() { const r = withLock_(findOldPayslips_); SpreadsheetApp.getUi().alert(`Found ${r.found} payslip PDF${r.found === 1 ? "" : "s"} in your email: linked ${r.linked} to months you already had, added ${r.added} new.`); }
+function api_findOldPayslips() {
+  const r = findOldPayslips_(); // no lock here: it takes a while and only locks for each save
+  return { result: r, data: api_getAll() };
+}
+function menuFindOldPayslips() { const r = findOldPayslips_(); SpreadsheetApp.getUi().alert(`Found ${r.found} payslip PDF${r.found === 1 ? "" : "s"} in your email. Added: ${r.months.join(", ") || "none"}. Already had: ${r.already.join(", ") || "none"}.${r.more ? " There's more: run it again to carry on." : ""}`); }
 
 // What this period's payslip should say: your lessons, else admin's weekly emails. Helps the reader pick the right numbers.
 function expectedGross_(start, end) {
