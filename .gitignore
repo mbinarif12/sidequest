@@ -7,3 +7,4 @@ History.gs
 .clasprc.json
 *.local.*
 docs/screenshots/_page.html
+release/
