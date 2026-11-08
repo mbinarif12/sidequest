@@ -206,9 +206,13 @@ dialog ul { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: 
   <nav><button data-act="nav" data-v="home">Home</button><button data-act="nav" data-v="lessons">Calendar</button><button data-act="nav" data-v="students">Students</button><button data-act="nav" data-v="payslips">Payslips</button><button data-act="nav" data-v="claim">Payment claim</button><button data-act="nav" data-v="profile">Profile</button></nav>
   <div class="tools"><span id="sync"></span><button class="btn small-b" data-act="sync">Sync calendar</button><button class="btn small-b" data-act="runnow">Check email</button><button class="avatar" id="me" data-act="nav" data-v="profile" aria-label="Profile"></button></div>
 </div></header>
-<div class="wrap"><main id="main"></main></div>
+<div class="wrap"><main id="main"><p class="muted" id="boot">Loading SideQuest…</p></main></div>
 <dialog id="dlg"></dialog>
 <div id="toast" role="status" hidden></div>
+<script>
+// If anything goes wrong before the app starts, say so on the page instead of staying blank
+window.addEventListener("error", e => { const m = document.getElementById("main"); if (m) m.insertAdjacentHTML("afterbegin", '<div class="card" style="border-color:#B3261E"><b>SideQuest hit an error</b><span>' + String(e.message || e).replace(/[<>&]/g, "") + (e.lineno ? " (line " + e.lineno + ")" : "") + '</span><span class="muted small">Send this to whoever maintains your SideQuest.</span></div>'); });
+</script>
 <script>
 /*LOGIC*/
 /*APP*/

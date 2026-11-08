@@ -40,7 +40,13 @@ function applyAll(d) {
   loaded = true; loadErr = ""; render();
   if (CAL.created) toast(`${CAL.created} class${CAL.created > 1 ? "es" : ""} logged from your calendar.`);
 }
-async function load() { try { applyAll(await gs("api_getAll")); } catch (e) { loadErr = e.message || String(e); render(); } }
+let slowTimer = null;
+async function load() {
+  clearTimeout(slowTimer);
+  slowTimer = setTimeout(() => { if (!loaded && !loadErr) { const m = $("#main"); if (m) m.insertAdjacentHTML("afterbegin", `<div class="note warn" id="slow">${ICON.alert}<span>Your data is taking unusually long to load (over 40 seconds). SideQuest may be busy with an email check or payslip search; it will appear as soon as that finishes. <button class="link" data-act="reload">Try again</button></span></div>`); } }, 40000);
+  try { applyAll(await gs("api_getAll")); } catch (e) { loadErr = e.message || String(e); render(); }
+  clearTimeout(slowTimer);
+}
 async function save(col, id, data) {
   const a = S[col], i = a.findIndex(x => x.id === id), doc = { ...data, id };
   i >= 0 ? a.splice(i, 1, doc) : a.push(doc); render();
@@ -177,7 +183,7 @@ function render() {
   $("#sync").title = CAL.error || (lastRun ? "Emails last checked " + new Date(lastRun).toLocaleString("en-IE") : "");
   const main = $("#main");
   if (loadErr) { main.innerHTML = `<div class="card empty">SideQuest couldn't read your Sheet. ${esc(loadErr)}<br><button class="btn" data-act="reload">Try again</button></div>`; return; }
-  if (!loaded) { main.innerHTML = `<div class="loading"><div class="sk big"></div><div class="sk"></div><div class="sk"></div></div>`; return; }
+  if (!loaded) { main.innerHTML = `<p class="muted">Loading your classes, payslips and calendar…</p><div class="loading"><div class="sk big"></div><div class="sk"></div><div class="sk"></div></div>`; return; }
   main.innerHTML = ({ home: vHome, lessons: vLessons, students: vStudents, payslips: vPayslips, claim: vClaim, profile: vProfile })[view]();
   applyTheme(); growAll(main);
   if (loaded) setTimeout(ensurePackageTodos, 0);

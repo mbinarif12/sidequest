@@ -191,13 +191,15 @@ function withLock_(fn) {
   try { return fn(); } finally { l.releaseLock(); }
 }
 function api_getAll() {
-  const cal = withLock_(syncCalendar_);
+  // The calendar sync must never stop the page from opening
+  let cal;
+  try { cal = withLock_(syncCalendar_); } catch (e) { cal = { created: 0, updated: 0, planned: [], unmatched: [], orphans: [], error: "Calendar sync skipped: " + e.message }; }
   const st = getSettings_(), profile = {};
   PROFILE_KEYS.forEach(k => profile[k] = st[k] || "");
   const status = {}; STATUS_KEYS.forEach(k => status[k] = st[k] || "");
   const todos = readRows_("Todos");
   const keys = todos.filter(t => !t.done).map(t => t.key || String(t.text).trim().toLowerCase());
-  if (new Set(keys).size < keys.length) withLock_(dedupeTodos_);
+  if (new Set(keys).size < keys.length) { try { withLock_(dedupeTodos_); } catch (e) {} }
   return { ...all_(), todos: readRows_("Todos"), lastRun: st.lastRun || "", today: today_(), now: new Date().toISOString(), calendar: cal, profile, rates: rates_(), status };
 }
 function api_saveProfile(p) {
