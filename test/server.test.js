@@ -15,6 +15,7 @@ function makeSheet() {
       getValues: () => [...Array(nr)].map((_, i) => [...Array(nc)].map((_, j) => (data[r - 1 + i] || [])[c - 1 + j] ?? "")),
       setValues(v) { v.forEach((row, i) => { data[r - 1 + i] = data[r - 1 + i] || []; row.forEach((x, j) => data[r - 1 + i][c - 1 + j] = x); }); return this; },
       setNumberFormat() { return this; }, setFontWeight() { return this; },
+      clearContent() { for (let i = 0; i < nr; i++) if (data[r - 1 + i]) for (let j = 0; j < nc; j++) data[r - 1 + i][c - 1 + j] = ""; return this; },
     }),
     setFrozenRows() {}, appendRow: row => data.push(row), deleteRow: i => data.splice(i - 1, 1),
   };
@@ -100,6 +101,9 @@ G.runCheck();
 const oct = G.readRows_("Payslips").find(p => p.payDate === "2026-10-31");
 assert(oct && oct.id !== "slip-aug" && oct.periodEnd === "2026-10-25"); assert.strictEqual(G.readRows_("Payslips").find(p => p.periodEnd === "2026-09-27").payDate, "2026-09-30");
 T("a new month's payslip gets its own entry (October period) instead of overwriting another month");
+for (let i = 0; i < 300; i++) G.upsert_("Todos", { id: "dup" + i, text: "Write Leah's student report", done: false, createdAt: "2026-11-0" + (1 + i % 5), key: "report-leah-x" });
+const t0 = Date.now(); const tds = G.api_getAll().todos.filter(x => x.key === "report-leah-x");
+assert.strictEqual(tds.length, 1); T(`300 copies of a repeated to-do are cleaned up in one step (${Date.now() - t0} ms), one is kept`);
 const P = G.L.buildPeriods("2026-09-01", "2026-11-20", [{ periodStart: "2026-08-31", periodEnd: "2026-09-27" }, { periodStart: "2026-09-28", periodEnd: "2026-11-01" }]);
 assert.strictEqual(P.find(p => p.name === "October").weeks, 5); assert.strictEqual(P.find(p => p.name === "November").start, "2026-11-02"); T("pay periods: a 5-week payslip moves the boundary, the rest follow");
 assert.strictEqual(G.L.periodFor("2026-10-31").name, "November"); T("pay periods: a week counts in the month its Sunday falls in");
