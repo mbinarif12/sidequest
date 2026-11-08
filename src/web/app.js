@@ -440,7 +440,11 @@ function searchLine() {
   if (state === "running") return `<div class="note soft">Searching your email for payslip PDFs (started ${when}). You can keep using SideQuest.</div>`;
   if (state === "error") return `<div class="note bad">${ICON.alert}<span>The payslip search stopped (${when}): ${esc(err.join("|"))}</span></div>`;
   let r = {}; try { r = JSON.parse(STATUS.oldSearchResult || "{}"); } catch (e) {}
-  return `<div class="note soft">Last payslip search (${when}): ${r.found ? `found ${r.found} payslip PDF${r.found > 1 ? "s" : ""}.${r.months && r.months.length ? " Added: " + esc(r.months.join(", ")) + "." : ""}${r.already && r.already.length ? " Already had: " + esc(r.already.join(", ")) + "." : ""}` : `checked ${r.emails || 0} emails, none had a payslip PDF.`}${r.problems && r.problems.length ? " Couldn't read: " + esc(r.problems.join("; ")) : ""}</div>`;
+  // Months whose pay date (around the 15th of the next month) has passed but still have no payslip PDF
+  const paydayPassed = x => { const d = new Date(x.end + "T12:00:00"); return new Date(d.getFullYear(), d.getMonth() + 1, 20).toISOString().slice(0, 10) <= TODAY; };
+  const missing = r.partial ? [] : periods().filter(x => paydayPassed(x) && !(x.slip && x.slip.pdfUrl)).map(x => x.name + (x.year !== +TODAY.slice(0, 4) ? " " + x.year : ""));
+  const miss = missing.length ? `<div class="note warn">${ICON.alert}<span>No payslip email found in Gmail for: <b>${esc(missing.join(", "))}</b>. If it came another way (WhatsApp, paper), upload the PDF to Google Drive and add it with <b>Add payslip</b> (or edit that month's payslip and paste the PDF link).</span></div>` : "";
+  return miss + `<div class="note soft">Last payslip search (${when}): ${r.found ? `found ${r.found} payslip PDF${r.found > 1 ? "s" : ""}.${r.months && r.months.length ? " Added: " + esc(r.months.join(", ")) + "." : ""}${r.already && r.already.length ? " Already had: " + esc(r.already.join(", ")) + "." : ""}` : `checked ${r.emails || 0} emails, none had a payslip PDF.`}${r.problems && r.problems.length ? " Couldn't read: " + esc(r.problems.join("; ")) : ""}</div>`;
 }
 function vPayslips() {
   const ps = periods().slice().reverse();
@@ -601,6 +605,7 @@ function slipDlg(s, p) {
     ${fld("q_d", "Payment date", s.payDate, "date")}${fld("q_g", "Gross pay (€)", s.gross, "number", 'step="0.01"')}${fld("q_n", "Net pay (€)", s.net, "number", 'step="0.01"')}
     ${fld("q_paye", "PAYE (€)", s.paye, "number", 'step="0.01"')}${fld("q_usc", "USC (€)", s.usc, "number", 'step="0.01"')}${fld("q_cum", "Year-to-date gross (€)", s.cumulativeGross, "number", 'step="0.01"')}
     ${fld("q_rec", "Money arrived on", s.receivedDate, "date")}</div>
+    <label class="fld">Link to the PDF (optional)<input id="q_pdf" type="url" value="${esc(s.pdfUrl || "")}" placeholder="Upload the PDF to Google Drive, then paste its share link"></label>
     <div class="acts end">${s.id ? `<button class="btn ghost danger" data-act="delslip" data-pid="${s.id}">Delete</button>` : ""}<button class="btn ghost" data-act="close">Cancel</button><button class="btn primary" data-act="saveslip" data-pid="${s.id || ""}">Save</button></div>`);
 }
 
@@ -718,7 +723,7 @@ document.addEventListener("click", async e => {
   if (a === "saveslip") {
     if (!dv("q_ps") || !dv("q_pe") || dn("q_g") == null) return toast("Fill in the dates it covers and the gross pay.");
     const old = S.payslips.find(x => x.id === D.pid) || { source: "manual" };
-    const data = { ...strip(old), periodStart: dv("q_ps"), periodEnd: dv("q_pe"), number: dn("q_no"), payDate: dv("q_d"), gross: dn("q_g"), net: dn("q_n"), paye: dn("q_paye"), usc: dn("q_usc"), cumulativeGross: dn("q_cum"), receivedDate: dv("q_rec"), needsCheck: false };
+    const data = { ...strip(old), periodStart: dv("q_ps"), periodEnd: dv("q_pe"), number: dn("q_no"), payDate: dv("q_d"), gross: dn("q_g"), net: dn("q_n"), paye: dn("q_paye"), usc: dn("q_usc"), cumulativeGross: dn("q_cum"), receivedDate: dv("q_rec"), pdfUrl: (dv("q_pdf") || "").trim(), needsCheck: false };
     dlg().close(); await save("payslips", D.pid || "slip-" + uid(), data); return toast("Payslip saved");
   }
   if (a === "delslip") { if (!armDelete(t, a + D.pid)) return; dlg().close(); return remove("payslips", D.pid); }
