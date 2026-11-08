@@ -434,7 +434,7 @@ function searchLine() {
   if (state === "running") return `<div class="note soft">Searching your email for payslip PDFs (started ${when}). You can keep using SideQuest.</div>`;
   if (state === "error") return `<div class="note bad">${ICON.alert}<span>The payslip search stopped (${when}): ${esc(err.join("|"))}</span></div>`;
   let r = {}; try { r = JSON.parse(STATUS.oldSearchResult || "{}"); } catch (e) {}
-  return `<div class="note soft">Last payslip search (${when}): ${r.found ? `found ${r.found} payslip PDF${r.found > 1 ? "s" : ""}.${r.months && r.months.length ? " Added: " + esc(r.months.join(", ")) + "." : ""}${r.already && r.already.length ? " Already had: " + esc(r.already.join(", ")) + "." : ""}` : "no emails with a payslip PDF attached were found in this Gmail account."}</div>`;
+  return `<div class="note soft">Last payslip search (${when}): ${r.found ? `found ${r.found} payslip PDF${r.found > 1 ? "s" : ""}.${r.months && r.months.length ? " Added: " + esc(r.months.join(", ")) + "." : ""}${r.already && r.already.length ? " Already had: " + esc(r.already.join(", ")) + "." : ""}` : `checked ${r.emails || 0} emails, none had a payslip PDF.`}${r.problems && r.problems.length ? " Couldn't read: " + esc(r.problems.join("; ")) : ""}</div>`;
 }
 function vPayslips() {
   const ps = periods().slice().reverse();
@@ -694,10 +694,13 @@ document.addEventListener("click", async e => {
   if (a === "received") { const s = S.payslips.find(x => x.id === D.pid); await save("payslips", s.id, { ...strip(s), receivedDate: TODAY }); return toast("Marked as arrived today. Click Edit to change the date."); }
   if (a === "newslip") { const p = periods().find(x => x.key === (D.k || selPeriod)); return slipDlg({}, p); }
   if (a === "findold") {
-    t.disabled = true;
-    try { const r = await gs("api_findOldPayslips"); applyAll(r.data); toast(r.started ? "Searching your email in the background. You can keep using SideQuest or close it; you'll see the result here." : "A search is already running.", 7000); }
-    catch (er) { toast("Couldn't start the search: " + (er.message || er)); }
-    t.disabled = false; return;
+    t.disabled = true; t.textContent = "Searching your email…";
+    try {
+      const r = await gs("api_findOldPayslips"); applyAll(r.data);
+      if (r.error) toast("The search stopped: " + r.error, 12000);
+      else { const x = r.result; toast(x.found ? `Checked ${x.emails} email${x.emails === 1 ? "" : "s"}, found ${x.found} payslip PDF${x.found > 1 ? "s" : ""}.${x.months.length ? " Added: " + x.months.join(", ") + "." : ""}${x.already.length ? " Already had: " + x.already.join(", ") + "." : ""}${x.more ? " Still going in the background." : ""}` : `Checked ${x.emails} email${x.emails === 1 ? "" : "s"}: none had a payslip PDF.`, 12000); }
+    } catch (er) { toast("Couldn't search: " + (er.message || er), 12000); }
+    t.disabled = false; t.textContent = "Find old payslip PDFs"; return;
   }
   if (a === "editslip") return slipDlg(S.payslips.find(x => x.id === D.pid));
   if (a === "reread") { t.disabled = true; t.textContent = "Reading…"; try { applyAll(await gs("api_rereadSlip", D.pid)); const p = S.payslips.find(x => x.id === D.pid); toast(p && !p.needsCheck ? "Read it: " + eur(p.gross) + " gross" : "Still couldn't read it. Type the amounts in instead."); } catch (er) { toast("Couldn't read it: " + (er.message || er)); } return; }

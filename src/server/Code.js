@@ -449,26 +449,27 @@ function cleanupPayslips_() {
 // Search ALL past emails for payslip PDFs, so older months get their PDF too.
 // Works in batches (about 4 minutes each) without holding the app's lock; press the button again to carry on.
 function findOldPayslips_() {
-  const started = Date.now(), budget = 4 * 60 * 1000;
+  const started = Date.now(), budget = 4 * 60 * 1000; // web calls are limited to 6 minutes
   const st = getSettings_();
   const senders = String(st.senders || "").split(/[,\s]+/).filter(Boolean).map(s => s.toLowerCase());
   // Any email with a payslip PDF, whoever sent it (older payslips sometimes come from a different admin address)
   // Only emails whose attachment is called "payslip…", plus PDFs from your wages senders. Narrow = fast.
   const queries = ["has:attachment filename:payslip"].concat(senders.length ? ["has:attachment filename:pdf (" + senders.map(s => "from:" + s).join(" OR ") + ")"] : []);
-  const res = { found: 0, linked: 0, added: 0, months: [], already: [], more: false };
+  const res = { found: 0, linked: 0, added: 0, months: [], already: [], more: false, emails: 0, problems: [] };
   const checked = new Set(readRows_("Processed").filter(r => r.type === "oldslip" || r.type === "payslip").map(r => r.messageId));
   const done = {};
   const seenTh = {}, threads = [];
   queries.forEach(q => GmailApp.search(q, 0, 200).forEach(th => { if (!seenTh[th.getId()]) { seenTh[th.getId()] = 1; threads.push(th); } }));
   for (const th of threads) {
     for (const m of th.getMessages()) {
-      if (done[m.getId()]) continue; done[m.getId()] = 1;
+      if (done[m.getId()]) continue; done[m.getId()] = 1; res.emails++;
       if (Date.now() - started > budget) { res.more = true; break; }
+      try {
       const body = m.getPlainBody() || "";
       const pdf = m.getAttachments({ includeInlineImages: false }).find(a => (/pdf/i.test(a.getContentType()) || /\.pdf$/i.test(a.getName())) && /payslip/i.test(a.getName() + " " + body));
       if (!pdf) continue;
       res.found++;
-      const period = L.parsePeriod(body);
+      const period = L.parsePeriod(body, m.getDate().getFullYear());
       const fm = pdf.getName().match(/(\d{2})-(\d{2})-(\d{4})/), fileDate = fm ? `${fm[3]}-${fm[2]}-${fm[1]}` : "";
       const slips = readRows_("Payslips");
       let slip = slips.find(s => period && s.periodEnd === period.end) || slips.find(s => fileDate && s.payDate === fileDate)
@@ -500,19 +501,23 @@ function findOldPayslips_() {
         }
         upsert_("Processed", { messageId: m.getId(), date: Utilities.formatDate(m.getDate(), TZ, "yyyy-MM-dd HH:mm"), subject: m.getSubject(), type: "oldslip", result: "Payslip PDF found: " + label });
       });
+      } catch (e) { res.problems.push(`"${m.getSubject()}": ${e.message}`); }
     }
     if (res.more) break;
   }
   if (!res.more) setSetting_("oldPayslipsSearched", new Date().toISOString());
   return res;
 }
-// The button starts the search in the background on Google's side, so you can keep using the app or close it.
+// The button runs the search straight away (it only looks at a handful of emails). If it runs out of time,
+// the rest carries on in the background and the Payslips page shows the result.
 function api_findOldPayslips() {
-  const st = getSettings_().oldSearch || "";
-  if (/^running/.test(st) && Date.now() - Date.parse(st.split("|")[1]) < 15 * 60 * 1000) return { started: false, data: api_getAll() };
-  setSetting_("oldSearch", "running|" + new Date().toISOString());
-  ScriptApp.newTrigger("oldPayslipsJob").timeBased().after(1000).create();
-  return { started: true, data: api_getAll() };
+  let r;
+  try { r = findOldPayslips_(); }
+  catch (e) { setSetting_("oldSearch", "error|" + new Date().toISOString() + "|" + e.message); return { result: null, error: e.message, data: api_getAll() }; }
+  setSetting_("oldSearchResult", JSON.stringify({ found: r.found, months: r.months, already: r.already, emails: r.emails, problems: r.problems, partial: r.more }));
+  if (r.more) { setSetting_("oldSearch", "running|" + new Date().toISOString()); ScriptApp.newTrigger("oldPayslipsJob").timeBased().after(1000).create(); }
+  else setSetting_("oldSearch", "done|" + new Date().toISOString());
+  return { result: r, data: api_getAll() };
 }
 function oldPayslipsJob() {
   ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === "oldPayslipsJob").forEach(t => ScriptApp.deleteTrigger(t));

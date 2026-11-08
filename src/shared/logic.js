@@ -170,15 +170,18 @@ const L = (() => {
   }
 
   // "…wages from 31 August to 27 September 2026" → {start, end}
-  function parsePeriod(raw) {
+  function parsePeriod(raw, fallbackYear) {
     const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
-    const m = String(raw || "").replace(/\s+/g, " ").match(/from (\d{1,2}) ([A-Za-z]+)(?: (\d{4}))? to (\d{1,2}) ([A-Za-z]+) (\d{4})/i);
+    // "from 31 August to 27 September 2026", and also "from 25 May to 28 June" (no year: use the email's year)
+    const m = String(raw || "").replace(/\s+/g, " ").match(/from (\d{1,2}) ([A-Za-z]+)(?: (\d{4}))? to (\d{1,2}) ([A-Za-z]+)(?: (\d{4}))?/i);
     if (!m) return null;
     const mi = s => months.findIndex(x => x.startsWith(s.toLowerCase().slice(0, 3))) + 1;
     const m1 = mi(m[2]), m2 = mi(m[5]); if (!m1 || !m2) return null;
-    const y2 = +m[6], y1 = m[3] ? +m[3] : (m1 > m2 ? y2 - 1 : y2);
+    const y2 = m[6] ? +m[6] : fallbackYear; if (!y2) return null;
+    const y1 = m[3] ? +m[3] : (m1 > m2 ? y2 - 1 : y2);
     return { start: `${y1}-${pad(m1)}-${pad(+m[1])}`, end: `${y2}-${pad(m2)}-${pad(+m[4])}` };
   }
+
 
   // ---- Pay periods (monthly, paid around the 15th of the next month) ----
   // Whole Mon–Sun weeks; a week belongs to the month its Sunday falls in.
