@@ -436,8 +436,19 @@ function handlePayslip_(m, body, pdf) {
 
 // Earlier versions could create the same package reminder many times. Keep the first of each.
 function dedupeTodos_() {
-  const seen = {}, rows = readRows_("Todos").sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-  rows.forEach(t => { const k = (t.key || String(t.text).trim().toLowerCase()) + (t.done ? "|done" : ""); if (seen[k]) delete_("Todos", t.id); else seen[k] = 1; });
+  // Rewrites the Todos tab in one go (deleting rows one at a time was far too slow when there were many copies)
+  const sh = SpreadsheetApp.getActive().getSheetByName("Todos");
+  if (!sh || sh.getLastRow() < 2) return 0;
+  const n = sh.getLastRow() - 1, w = sh.getLastColumn(), head = headOf_(sh);
+  const vals = sh.getRange(2, 1, n, w).getValues(), iT = head.indexOf("text"), iK = head.indexOf("key"), iD = head.indexOf("done"), iC = head.indexOf("createdAt");
+  const order = vals.map((r, i) => i).sort((a, b) => String(vals[a][iC]).localeCompare(String(vals[b][iC])));
+  const seen = {}, keep = new Array(n).fill(false);
+  order.forEach(i => { const r = vals[i]; if (String(r[0]) === "") return; const k = (String(r[iK] || "") || String(r[iT]).trim().toLowerCase()) + (String(r[iD]).toUpperCase() === "TRUE" ? "|done" : ""); if (!seen[k]) { seen[k] = 1; keep[i] = true; } });
+  const kept = vals.filter((r, i) => keep[i]);
+  if (kept.length === n) return 0;
+  sh.getRange(2, 1, n, w).clearContent();
+  if (kept.length) sh.getRange(2, 1, kept.length, w).setValues(kept);
+  return n - kept.length;
 }
 
 // Earlier versions mistook weekly emails that quote a payslip email for payslips. Remove those empty entries
