@@ -159,6 +159,27 @@ async function ensurePackageTodos() {
   }
   pkgSyncing = false;
 }
+// Ticked to-dos stay in the Sheet; this lists them, newest first (each one once)
+let showAllDone = false, doneOpen = false;
+document.addEventListener("toggle", e => { if (e.target.classList && e.target.classList.contains("donelist")) doneOpen = e.target.open; }, true);
+function doneTodos() {
+  const out = [], seen = new Set();
+  S.todos.filter(t => t.done).forEach(t => {
+    const k = t.key || t.text.trim().toLowerCase(); if (seen.has(k) || S.todos.some(y => !y.done && (y.key || y.text.trim().toLowerCase()) === k)) return; seen.add(k);
+    out.push({ tid: t.id, title: t.text, at: t.doneAt || "", sub: t.key ? "Package ending" : "Your to-do" });
+  });
+  S.lessons.filter(l => l.followups && l.followupsDone)
+    .forEach(l => out.push({ lid: l.id, title: l.followups.split("\n")[0], at: l.followupsDoneAt || "", sub: `${nameOf(l)} · ${fmtD(l.date)}` }));
+  return out.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+}
+function doneSection() {
+  const all = doneTodos(); if (!all.length) return "";
+  const cut = L.addDays(TODAY, -30), recent = all.filter(t => t.at && t.at.slice(0, 10) >= cut), list = showAllDone ? all : recent;
+  const row = t => `<div class="li done"><input type="checkbox" checked aria-label="Not done yet" title="Untick to put it back on your list" data-act="undo" data-tid="${esc(t.tid || "")}" data-lid="${esc(t.lid || "")}"><div class="grow"><s>${esc(t.title)}</s><br><span class="muted small">${esc(t.sub)}${t.at ? " · done " + fmtD(t.at.slice(0, 10), { day: "numeric", month: "short" }) : ""}</span></div></div>`;
+  return `<details class="pay donelist"${doneOpen ? " open" : ""}><summary>Done <b>${recent.length}</b> in the last 30 days</summary>
+    ${list.length ? list.map(row).join("") : `<p class="muted small">Nothing ticked off in the last 30 days.</p>`}
+    ${!showAllDone && all.length > recent.length ? `<button class="link" data-act="showalldone">Show all ${all.length} done</button>` : ""}</details>`;
+}
 function todos() {
   const out = [];
   CAL.orphans.forEach(id => { const l = S.lessons.find(x => x.id === id); if (l) out.push({ id: "or-" + id, act: "open", lid: id, title: `${nameOf(l)}'s ${fmtD(l.date)} class is no longer in your calendar`, sub: "Was it cancelled or moved?", warn: true }); });
@@ -254,6 +275,7 @@ function vHome() {
       <form class="addtodo" data-form="todo"><label for="newtodo" class="sr">New to-do</label><textarea id="newtodo" rows="1" placeholder="Add your own to-do, e.g. Make an exam for Sadhbh"></textarea><button class="btn" type="submit">Add</button></form>
       ${td.length ? td.map(t => `<div class="li">${t.act === "fudone" || t.act === "mine" ? `<input type="checkbox" aria-label="Done" data-act="${t.act === "mine" ? "minedone" : "fudone"}" data-lid="${esc(t.lid || "")}" data-tid="${esc(t.tid || "")}">` : `<span class="dot ${t.warn ? "warn" : ""}" aria-hidden="true"></span>`}<button class="todo grow" data-act="todo" data-t="${esc(t.act)}" data-lid="${esc(t.lid || "")}" data-sid="${esc(t.sid || "")}" data-pid="${esc(t.pid || "")}"><b>${esc(t.title)}</b><br><span class="muted small">${esc(t.sub)}</span></button></div>`).join("")
         : `<p class="empty">All done.</p>`}
+      ${doneSection()}
       <p class="muted small">Comes from your own to-dos, your notes' "To do after class", classes still missing notes, and exam + report reminders when a package is ending.</p></div>
   </section>`;
 }
@@ -676,12 +698,19 @@ document.addEventListener("click", async e => {
     if (D.t === "slip") { const s = S.payslips.find(x => x.id === D.pid); return slipDlg(s); }
     if (D.t === "mine") return;
   }
-  if (a === "fudone") { const l = S.lessons.find(x => x.id === D.lid); return save("lessons", l.id, { ...strip(l), followupsDone: true }); }
+  if (a === "fudone") { const l = S.lessons.find(x => x.id === D.lid); return save("lessons", l.id, { ...strip(l), followupsDone: true, followupsDoneAt: new Date().toISOString() }); }
   if (a === "minedone") {
     const x = S.todos.find(y => y.id === D.tid), k = x.key || x.text.trim().toLowerCase();
-    for (const y of S.todos.filter(y => !y.done && (y.key || y.text.trim().toLowerCase()) === k)) await save("todos", y.id, { ...strip(y), done: true });
+    const at = new Date().toISOString();
+    for (const y of S.todos.filter(y => !y.done && (y.key || y.text.trim().toLowerCase()) === k)) await save("todos", y.id, { ...strip(y), done: true, doneAt: at });
     return;
   }
+  if (a === "undo") { // untick something in the Done list: it goes back on the to-do list
+    if (D.tid) { const x = S.todos.find(y => y.id === D.tid); if (x) await save("todos", x.id, { ...strip(x), done: false, doneAt: "" }); }
+    else { const l = S.lessons.find(x => x.id === D.lid); if (l) await save("lessons", l.id, { ...strip(l), followupsDone: false, followupsDoneAt: "" }); }
+    return toast("Back on your to-do list");
+  }
+  if (a === "showalldone") { showAllDone = true; return render(); }
   if (a === "orphankeep") { const l = S.lessons.find(x => x.id === D.lid); CAL.orphans = CAL.orphans.filter(i => i !== l.id); dlg().close(); await save("lessons", l.id, { ...strip(l), eventId: "kept" }); return toast("Kept"); }
   if (a === "orphandel") { CAL.orphans = CAL.orphans.filter(i => i !== D.lid); sel = null; dlg().close(); await remove("lessons", D.lid); return toast("Removed"); }
   if (a === "theme") { PROFILE.theme = D.k; applyTheme(); t.parentElement.querySelectorAll("button").forEach(b => b.classList.toggle("on", b === t)); try { await gs("api_saveProfile", { theme: D.k }); } catch (er) { toast("Couldn't save the theme: " + (er.message || er)); } return; }

@@ -63,7 +63,7 @@ const weeks = { "2026-11-02": weekEvents("2026-11-02"), "2026-11-09": weekEvents
 const planned = [...weeks["2026-11-02"].events, ...weeks["2026-11-09"].events].filter(e => e.studentId && e.date > "2026-11-06" || (e.studentId && e.date === "2026-11-06"))
   .map(e => ({ eventId: e.key, studentId: e.studentId, date: e.date, time: e.start, hours: students.find(s => s.id === e.studentId).hours, start: `${e.date}T${e.start}:00Z`, title: e.title, lessonId: "" }));
 const state = {
-  students, lessons, statements, payslips, todos: [{ id: "t1", text: "Book exam paper printing", done: false, createdAt: "2026-11-05" }],
+  students, lessons, statements, payslips, todos: [{ id: "t1", text: "Book exam paper printing", done: false, createdAt: "2026-11-05" }, { id: "t2", text: "Email Leah's parents about the mock exam", done: true, createdAt: "2026-11-02", doneAt: "2026-11-06T18:20:00Z" }],
   lastRun: "2026-11-02T09:12:00Z", today: TODAY, now: `${TODAY}T15:00:00Z`,
   calendar: { created: 0, planned, unmatched: ["Lunch", "Gym", "Lecture: Statistics"], orphans: [], error: "" },
   profile: { teacherName: "Alex Teacher", adminName: "Sam", email: "alex.teacher@example.com", subjects: "Leaving Cert Maths (H), Applied Maths (H)", theme: "light", calendarId: "primary", autoLog: "yes", emailSummary: "yes", senders: "admin@example.com" },

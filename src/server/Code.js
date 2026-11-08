@@ -8,12 +8,12 @@
 // New columns are only ever added at the END of a tab, so older sheets keep lining up.
 const TABS = {
   Students: ["id", "name", "subject", "code", "weekday", "time", "hours", "rate", "pkgSize", "priorCount", "startDate", "notes", "active", "calKeyword", "ownRate"],
-  Lessons: ["id", "date", "time", "studentId", "label", "kind", "hours", "rate", "number", "topic", "homework", "notes", "followups", "followupsDone", "updatedAt", "eventId", "source"],
+  Lessons: ["id", "date", "time", "studentId", "label", "kind", "hours", "rate", "number", "topic", "homework", "notes", "followups", "followupsDone", "updatedAt", "eventId", "source", "followupsDoneAt"],
   Statements: ["id", "weekStart", "weekEnd", "totalHours", "totalAmount", "lines", "raw", "source", "savedAt", "resolved"],
   Payslips: ["id", "number", "payDate", "periodStart", "periodEnd", "gross", "net", "cumulativeGross", "paye", "usc", "receivedDate", "pdfUrl", "needsCheck", "source", "mismatchOk", "pdfText"],
   Processed: ["messageId", "date", "subject", "type", "result"],
   Settings: ["key", "value", "about"],
-  Todos: ["id", "text", "done", "createdAt", "key"],
+  Todos: ["id", "text", "done", "createdAt", "key", "doneAt"],
 };
 const COL_TAB = { students: "Students", lessons: "Lessons", statements: "Statements", payslips: "Payslips", todos: "Todos" };
 const NUM = ["weekday", "hours", "rate", "pkgSize", "priorCount", "number", "totalHours", "totalAmount", "gross", "net", "cumulativeGross", "paye", "usc", "ownRate"];
@@ -133,6 +133,12 @@ function importHistory() {
 // ---------- Sheet storage ----------
 function sheet_(name) { const sh = SpreadsheetApp.getActive().getSheetByName(name); if (!sh) throw new Error(`The "${name}" tab is missing. Run SideQuest → Set up / repair.`); return sh; }
 function headOf_(sh) { return sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String); }
+// Older Sheets get any newer columns added at the end the first time they're needed
+function headWithNew_(sh, name) {
+  const head = headOf_(sh), add = (TABS[name] || []).filter(h => !head.includes(h));
+  if (add.length) { sh.getRange(1, head.length + 1, 1, add.length).setValues([add]).setFontWeight("bold"); sh.getRange(1, head.length + 1, sh.getMaxRows(), add.length).setNumberFormat("@"); }
+  return head.concat(add);
+}
 
 function readRows_(name) {
   const sh = SpreadsheetApp.getActive().getSheetByName(name);
@@ -159,7 +165,7 @@ function toCell_(h, v) {
   return String(v).slice(0, 49000);
 }
 function upsert_(name, obj) {
-  const sh = sheet_(name), head = headOf_(sh);
+  const sh = sheet_(name), head = headWithNew_(sh, name);
   const row = head.map(h => toCell_(h, obj[h]));
   const n = sh.getLastRow();
   const ids = n > 1 ? sh.getRange(2, 1, n - 1, 1).getValues().map(r => String(r[0])) : [];

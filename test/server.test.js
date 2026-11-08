@@ -54,7 +54,9 @@ const ctx = {
   Drive: { Files: { create: () => ({ id: "d" }) } }, DocumentApp: { openById: () => ({ getBody: () => ({ getText: () => slipText }) }) }, MimeType: { GOOGLE_DOCS: "doc" },
 };
 vm.createContext(ctx);
-vm.runInContext(["Logic.js", "Code.js"].map(f => fs.readFileSync(path.join(dist, f), "utf8")).join("\n") +
+// The same checks run against the single Code.gs that people paste in by hand (npm test runs both)
+const files = process.env.SQ_RELEASE ? [path.join(__dirname, "..", "release", "Code.gs")] : ["Logic.js", "Code.js"].map(f => path.join(dist, f));
+vm.runInContext(files.map(f => fs.readFileSync(f, "utf8")).join("\n") +
   "\nthis.__ = { setup, runCheck, api_getAll, api_save, api_week, findOldPayslips_, api_findOldPayslips, oldPayslipsJob, setSetting_, readRows_, upsert_, L };", ctx);
 const G = ctx.__;
 
@@ -104,6 +106,12 @@ T("a new month's payslip gets its own entry (October period) instead of overwrit
 for (let i = 0; i < 300; i++) G.upsert_("Todos", { id: "dup" + i, text: "Write Leah's student report", done: false, createdAt: "2026-11-0" + (1 + i % 5), key: "report-leah-x" });
 const t0 = Date.now(); const tds = G.api_getAll().todos.filter(x => x.key === "report-leah-x");
 assert.strictEqual(tds.length, 1); T(`300 copies of a repeated to-do are cleaned up in one step (${Date.now() - t0} ms), one is kept`);
+{ // A Sheet made before the "doneAt" column existed: ticking a to-do adds the column instead of losing the date
+  const old = makeSheet(); old.appendRow(["id", "text", "done", "createdAt", "key"]); old.appendRow(["o1", "Old task", "FALSE", "2026-10-01", ""]); sheets.Todos = old;
+  G.upsert_("Todos", { id: "o1", text: "Old task", done: true, createdAt: "2026-10-01", key: "", doneAt: "2026-11-08T12:00:00Z" });
+  const r = G.readRows_("Todos").find(x => x.id === "o1"); assert.strictEqual(r.doneAt, "2026-11-08T12:00:00Z"); assert.strictEqual(r.text, "Old task");
+  T("ticking a to-do in an older Sheet adds the new 'done on' column and keeps the date");
+}
 const P = G.L.buildPeriods("2026-09-01", "2026-11-20", [{ periodStart: "2026-08-31", periodEnd: "2026-09-27" }, { periodStart: "2026-09-28", periodEnd: "2026-11-01" }]);
 assert.strictEqual(P.find(p => p.name === "October").weeks, 5); assert.strictEqual(P.find(p => p.name === "November").start, "2026-11-02"); T("pay periods: a 5-week payslip moves the boundary, the rest follow");
 assert.strictEqual(G.L.periodFor("2026-10-31").name, "November"); T("pay periods: a week counts in the month its Sunday falls in");
