@@ -12,12 +12,6 @@ It runs free on your own Google account (a Google Sheet plus a small Apps Script
 
 If you tutor through an agency, your pay usually comes from three places that don't talk to each other:
 
-| What you have | What it tells you |
-|---|---|
-| **Your calendar and notes** | Which classes you actually taught |
-| **The agency's weekly email** | What they say they owe you for last week |
-| **The monthly payslip** | What they actually paid (just a total, no class list) |
-
 Mistakes slip in: a class left off a weekly email, half an hour paid instead of an hour, a payslip that doesn't add up. Catching them by hand means a spreadsheet you fill in after every class. SideQuest does that checking for you.
 
 ## What it does for you
