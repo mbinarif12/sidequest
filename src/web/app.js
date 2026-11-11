@@ -465,7 +465,7 @@ function searchLine() {
   // Months whose pay date (around the 15th of the next month) has passed but still have no payslip PDF
   const paydayPassed = x => { const d = new Date(x.end + "T12:00:00"); return new Date(d.getFullYear(), d.getMonth() + 1, 20).toISOString().slice(0, 10) <= TODAY; };
   const missing = r.partial ? [] : periods().filter(x => paydayPassed(x) && !(x.slip && x.slip.pdfUrl)).map(x => x.name + (x.year !== +TODAY.slice(0, 4) ? " " + x.year : ""));
-  const miss = missing.length ? `<div class="note warn">${ICON.alert}<span>No payslip email found in Gmail for: <b>${esc(missing.join(", "))}</b>. If it came another way (WhatsApp, paper), upload the PDF to Google Drive and add it with <b>Add payslip</b> (or edit that month's payslip and paste the PDF link).</span></div>` : "";
+  const miss = missing.length ? `<div class="note warn">${ICON.alert}<span>No payslip email found in Gmail for: <b>${esc(missing.join(", "))}</b>. If it came another way (WhatsApp, paper), press <b>Add payslip</b> and upload the PDF.</span></div>` : "";
   return miss + `<div class="note soft">Last payslip search (${when}): ${r.found ? `found ${r.found} payslip PDF${r.found > 1 ? "s" : ""}.${r.months && r.months.length ? " Added: " + esc(r.months.join(", ")) + "." : ""}${r.already && r.already.length ? " Already had: " + esc(r.already.join(", ")) + "." : ""}` : `checked ${r.emails || 0} emails, none had a payslip PDF.`}${r.problems && r.problems.length ? " Couldn't read: " + esc(r.problems.join("; ")) : ""}</div>`;
 }
 function vPayslips() {
@@ -497,7 +497,7 @@ function slipPanel(p) {
   if (!s) return `<span class="eyebrow">${fmtD(p.start)} – ${fmtD(p.end)}</span><h2>${p.name}</h2>
     ${line("Your lessons", `<b>${eur(p.logged)}</b>`)}${line("Work", `${p.lessons.length} items · ${hrs(p.hours)}`)}${line("Admin's weekly emails", `${p.stmts.length} of ${Math.round(p.weeks)} · ${eur(p.confirmed)}`)}${line(p.status === "open" ? "Paid by" : "Expected by", fmtD(p.due, { day: "numeric", month: "long" }))}
     <p class="muted small">${p.status === "open" ? "This period is still running." : "The payslip usually arrives by email at the end of the month. It's added automatically."}</p>
-    <div class="acts end"><button class="btn" data-act="newslip" data-k="${p.key}">Add payslip by hand</button></div>`;
+    <div class="acts end"><button class="btn" data-act="newslip" data-k="${p.key}">Add payslip</button></div>`;
   return `<span class="eyebrow">${s.number ? "Payslip " + s.number + " · " : ""}${s.payDate ? fmtD(s.payDate) : fmtD(p.start) + " – " + fmtD(p.end)}</span><h2>${p.name}</h2>
     ${s.needsCheck ? `<div class="note warn">${ICON.alert}<span>The amounts couldn't be read from the PDF yet.</span></div><div class="acts">${s.pdfUrl ? `<button class="btn" data-act="reread" data-pid="${s.id}">Read the PDF again</button>` : ""}<button class="btn ghost" data-act="editslip" data-pid="${s.id}">Type them in</button></div>` : ""}
     ${line("Gross pay", `<b>${s.gross != null ? eur(s.gross) : "—"}</b>`)}
@@ -622,14 +622,41 @@ function studentDlg(s) {
 }
 function slipDlg(s, p) {
   openDlg(`<h2>${s.id ? "Edit payslip" : "Add payslip"}</h2>
-    ${s.id ? "" : `<label class="fld">Paste the payslip text (optional)<textarea id="p_raw" rows="3" placeholder="Open the PDF, select all, copy, paste here"></textarea></label><div class="acts"><button class="btn ghost" data-act="fillslip">Fill in from text</button></div>`}
-    <div class="f3">${fld("q_ps", "Covers from", s.periodStart || p?.start, "date")}${fld("q_pe", "Covers to", s.periodEnd || p?.end, "date")}${fld("q_no", "Payslip number", s.number, "number")}
+    <div class="upload"><label class="btn${s.pdfUrl ? " ghost" : " primary"}">${ICON.doc || ""}${s.pdfUrl ? "Replace with another PDF" : "Upload payslip PDF"}<input id="q_file" type="file" accept="application/pdf,.pdf" hidden></label>
+      <span class="muted small" id="q_up">${s.pdfUrl ? "" : "SideQuest reads it and fills everything in. It's saved to your Drive."}</span></div>
+    ${s.id ? "" : `<details class="pay"><summary>No PDF? Paste the payslip text instead</summary><label class="fld">Payslip text<textarea id="p_raw" rows="3" placeholder="Open the PDF, select all, copy, paste here"></textarea></label><div class="acts"><button class="btn ghost" data-act="fillslip">Fill in from text</button></div></details>`}
+    <div class="f3">${fld("q_ps", "Covers from", s.periodStart || p?.start, "date")}${fld("q_pe", "Covers to", s.periodEnd || p?.end, "date")}
     ${fld("q_d", "Payment date", s.payDate, "date")}${fld("q_g", "Gross pay (€)", s.gross, "number", 'step="0.01"')}${fld("q_n", "Net pay (€)", s.net, "number", 'step="0.01"')}
     ${fld("q_paye", "PAYE (€)", s.paye, "number", 'step="0.01"')}${fld("q_usc", "USC (€)", s.usc, "number", 'step="0.01"')}${fld("q_cum", "Year-to-date gross (€)", s.cumulativeGross, "number", 'step="0.01"')}
     ${fld("q_rec", "Money arrived on", s.receivedDate, "date")}</div>
-    <label class="fld">Link to the PDF (optional)<input id="q_pdf" type="url" value="${esc(s.pdfUrl || "")}" placeholder="Upload the PDF to Google Drive, then paste its share link"></label>
+    <label class="fld">Link to the PDF<input id="q_pdf" type="url" value="${esc(s.pdfUrl || "")}" placeholder="Filled in when you upload the PDF"></label>
     <div class="acts end">${s.id ? `<button class="btn ghost danger" data-act="delslip" data-pid="${s.id}">Delete</button>` : ""}<button class="btn ghost" data-act="close">Cancel</button><button class="btn primary" data-act="saveslip" data-pid="${s.id || ""}">Save</button></div>`);
 }
+
+// ---- Payslip PDF upload: the server saves it to Drive, reads it, and the form fills itself in ----
+let slipText = null;
+document.addEventListener("change", e => {
+  if (e.target.id !== "q_file" || !e.target.files.length) return;
+  const f = e.target.files[0], note = $("#q_up"), btn = $("[data-act=saveslip]");
+  if (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") return toast("That isn't a PDF.");
+  if (f.size > 10e6) return toast("That PDF is over 10 MB. Is it the right file?");
+  note.textContent = "Reading the payslip…"; btn.disabled = true;
+  const r = new FileReader();
+  r.onload = async () => {
+    try {
+      const x = await gs("api_readSlipPdf", f.name, String(r.result).split(",")[1]);
+      const set = (i, v) => { if (v != null && v !== "" && $("#" + i)) $("#" + i).value = v; };
+      set("q_ps", x.periodStart); set("q_pe", x.periodEnd); set("q_d", x.payDate); set("q_g", x.gross); set("q_n", x.net); set("q_cum", x.cumulativeGross); set("q_pdf", x.pdfUrl);
+      // Already have a payslip for that month (e.g. from email)? Update it rather than adding a second one
+      if (x.existingId && !btn.dataset.pid) btn.dataset.pid = x.existingId;
+      slipText = { pid: btn.dataset.pid || "", text: x.pdfText };
+      note.textContent = (x.read ? "Filled in from the PDF. Check the numbers, then Save." : "Saved the PDF, but couldn't read the amounts. Fill in the gross and net pay.")
+        + (x.existingId && x.existingName ? ` This updates your ${x.existingName} payslip.` : "");
+    } catch (err) { note.textContent = "Couldn't read that PDF: " + (err.message || err); }
+    btn.disabled = false;
+  };
+  r.readAsDataURL(f);
+});
 
 // ---- Events ----
 let delArm = null;
@@ -746,14 +773,14 @@ document.addEventListener("click", async e => {
   if (a === "reread") { t.disabled = true; t.textContent = "Reading…"; try { applyAll(await gs("api_rereadSlip", D.pid)); const p = S.payslips.find(x => x.id === D.pid); toast(p && !p.needsCheck ? "Read it: " + eur(p.gross) + " gross" : "Still couldn't read it. Type the amounts in instead."); } catch (er) { toast("Couldn't read it: " + (er.message || er)); } return; }
   if (a === "fillslip") {
     const r = L.parsePayslip($("#p_raw").value), set = (i, x) => { if (x != null) $("#" + i).value = x; };
-    set("q_no", r.number); set("q_d", r.payDate); set("q_g", r.gross); set("q_n", r.net); set("q_cum", r.cumulativeGross); set("q_paye", r.paye); set("q_usc", r.usc);
+    set("q_d", r.payDate); set("q_g", r.gross); set("q_n", r.net); set("q_cum", r.cumulativeGross); set("q_paye", r.paye); set("q_usc", r.usc);
     return toast(r.gross != null ? "Filled in. Check the numbers before saving." : "Couldn't read that text. Fill in the fields by hand.");
   }
   if (a === "saveslip") {
     if (!dv("q_ps") || !dv("q_pe") || dn("q_g") == null) return toast("Fill in the dates it covers and the gross pay.");
     const old = S.payslips.find(x => x.id === D.pid) || { source: "manual" };
-    const data = { ...strip(old), periodStart: dv("q_ps"), periodEnd: dv("q_pe"), number: dn("q_no"), payDate: dv("q_d"), gross: dn("q_g"), net: dn("q_n"), paye: dn("q_paye"), usc: dn("q_usc"), cumulativeGross: dn("q_cum"), receivedDate: dv("q_rec"), pdfUrl: (dv("q_pdf") || "").trim(), needsCheck: false };
-    dlg().close(); await save("payslips", D.pid || "slip-" + uid(), data); return toast("Payslip saved");
+    const data = { ...strip(old), periodStart: dv("q_ps"), periodEnd: dv("q_pe"), payDate: dv("q_d"), gross: dn("q_g"), net: dn("q_n"), paye: dn("q_paye"), usc: dn("q_usc"), cumulativeGross: dn("q_cum"), receivedDate: dv("q_rec"), pdfUrl: (dv("q_pdf") || "").trim(), needsCheck: false, ...(slipText && slipText.pid === (D.pid || "") ? { pdfText: slipText.text } : {}) };
+    slipText = null; dlg().close(); await save("payslips", D.pid || "slip-" + uid(), data); return toast("Payslip saved");
   }
   if (a === "delslip") { if (!armDelete(t, a + D.pid)) return; dlg().close(); return remove("payslips", D.pid); }
   if (a === "pastecheck") {
