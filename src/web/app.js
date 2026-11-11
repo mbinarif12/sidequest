@@ -107,10 +107,14 @@ function issues() {
   });
   periods().forEach(p => {
     if (p.slip && p.slip.gross != null && p.lessons.length && L.cents(p.slip.gross) !== L.cents(p.logged) && !p.slip.mismatchOk)
-      out.push({ key: p.slip.id, slipId: p.slip.id, title: `${p.name} payslip`, list: [{ text: `Payslip says ${eur(p.slip.gross)}, your lessons add up to ${eur(p.logged)} (${p.slip.gross < p.logged ? eur(p.logged - p.slip.gross) + " short" : eur(p.slip.gross - p.logged) + " more"})` }] });
+      out.push({ key: p.slip.id, slipId: p.slip.id, title: `${p.name} payslip`, list: [p.slip.gross < p.logged
+        ? { sev: "bad", text: `Payslip says ${eur(p.slip.gross)}, your lessons add up to ${eur(p.logged)}: ${eur(p.logged - p.slip.gross)} short` }
+        : { sev: "warn", text: `Payslip says ${eur(p.slip.gross)}, ${eur(p.slip.gross - p.logged)} more than your lessons (${eur(p.logged)}). Usually a class or meeting that isn't in your log yet.` }] });
   });
   return out;
 }
+// Being paid less is a problem (red); being paid more is only worth a check (amber)
+const issueCount = (list, sev) => list.reduce((a, g) => a + g.list.filter(i => (i.sev || "bad") === sev).length, 0);
 function calSlotsForWeek(ws) {
   // Planned lessons for the week: calendar events, or each student's weekly slot if the calendar isn't readable.
   const we = L.addDays(ws, 6), items = [];
@@ -231,7 +235,7 @@ function welcome() {
 }
 function vHome() {
   if (!S.students.length && !S.lessons.length) return welcome();
-  const ps = periods(), iss = issues(), nIss = iss.reduce((a, g) => a + g.list.length, 0);
+  const ps = periods(), iss = issues(), nIss = issueCount(iss, "bad"), nChk = issueCount(iss, "warn");
   const due = ps.filter(p => p.status === "slip" || p.status === "due");
   const next = due[0] || ps[ps.length - 1];
   const after = next ? ps.find(p => p.key > next.key) : null;
@@ -254,9 +258,9 @@ function vHome() {
   }
   const side = `<div class="side">
     ${after ? `<div class="card tight"><span class="eyebrow">After that</span><div class="amt2">${eur(after.logged)}</div><div class="muted small">So far for ${fmtD(after.start)} – ${fmtD(after.end)} (${Math.round(after.weeks)} weeks) · due by ${fmtD(after.due)}</div></div>` : ""}
-    <button class="card status ${nIss ? "bad" : "good"}" data-act="issues" ${nIss ? "" : "disabled"}>
-      <span class="ico">${nIss ? ICON.alert : ICON.ok}</span>
-      <span class="grow"><b>${nIss ? `${nIss} pay problem${nIss > 1 ? "s" : ""}` : "No pay problems"}</b><br><span class="muted small">${nIss ? "Tap to see what doesn't match" : "Every lesson matches admin's emails"}</span></span>
+    <button class="card status ${nIss ? "bad" : nChk ? "warn" : "good"}" data-act="issues" ${nIss || nChk ? "" : "disabled"}>
+      <span class="ico">${nIss || nChk ? ICON.alert : ICON.ok}</span>
+      <span class="grow"><b>${nIss ? `${nIss} pay problem${nIss > 1 ? "s" : ""}` : "No pay problems"}</b><br><span class="muted small">${nIss ? "Tap to see what doesn't match" : nChk ? `${nChk} thing${nChk > 1 ? "s" : ""} to check: paid more than you logged` : "Every lesson matches admin's emails"}</span></span>
     </button></div>`;
   const earned = sum(ps, p => p.logged), paid = sum(ps.filter(p => p.status === "paid"), p => p.slip.gross ?? p.logged);
   const strip = ps.slice(-6).map(p => {
@@ -476,7 +480,7 @@ function vPayslips() {
     <td><b>${x.name}</b>${x.year !== +TODAY.slice(0, 4) ? " " + x.year : ""}<br><span class="muted small">${fmtD(x.start)} – ${fmtD(x.end)} · ${Math.round(x.weeks)} weeks</span></td>
     <td class="r num">${eur(x.logged)}</td><td class="r num b">${x.slip && x.slip.gross != null ? eur(x.slip.gross) : `<span class="muted">—</span>`}</td><td>${pill(c, t)}</td></tr>`; }).join("");
   const wk = S.statements.filter(s => s.week).sort((a, b) => b.week.start.localeCompare(a.week.start));
-  const issByStmt = Object.fromEntries(issues().filter(g => g.stmt).map(g => [g.stmt.id, g.list.length]));
+  const issByStmt = Object.fromEntries(issues().filter(g => g.stmt).map(g => [g.stmt.id, g.list.filter(i => i.sev !== "warn").length])), chkByStmt = Object.fromEntries(issues().filter(g => g.stmt).map(g => [g.stmt.id, g.list.filter(i => i.sev === "warn").length]));
   return `<div class="row-b"><div><h1>Payslips</h1><div class="muted">Pay periods run Monday to the last Sunday of the month. Money arrives around the 15th of the next month.</div></div><span class="acts">${/^running/.test(STATUS.oldSearch || "") ? `<span class="pill due">Searching your email…</span>` : `<button class="btn ghost" data-act="findold">Find old payslip PDFs</button>`}<button class="btn" data-act="newslip">Add payslip</button></span></div>
   ${searchLine()}
   <section class="split2 top">
@@ -484,7 +488,7 @@ function vPayslips() {
     <aside class="card panel">${p ? slipPanel(p) : `<p class="empty">No pay periods yet.</p>`}</aside>
   </section>
   <section class="card"><h2>Admin's weekly emails</h2>
-    ${wk.length ? wk.map(s => { const n = issByStmt[s.id] || 0; return `<div class="li"><div class="grow"><b>${fmtD(s.week.start)} – ${fmtD(s.week.end)}</b> <span class="muted small">· ${(s.lines || []).length} lines</span></div><span class="num b">${eur(stmtTotal(s))}</span>${s.resolved ? pill("open", "Sorted") : n ? `<button class="pill bad" data-act="issues">${n} pay problem${n > 1 ? "s" : ""}</button>` : pill("ok", "Matches")}</div>`; }).join("") : `<p class="empty">None yet. They're picked up from your Gmail every Monday and Tuesday morning.</p>`}
+    ${wk.length ? wk.map(s => { const n = issByStmt[s.id] || 0; return `<div class="li"><div class="grow"><b>${fmtD(s.week.start)} – ${fmtD(s.week.end)}</b> <span class="muted small">· ${(s.lines || []).length} lines</span></div><span class="num b">${eur(stmtTotal(s))}</span>${s.resolved ? pill("open", "Sorted") : n ? `<button class="pill bad" data-act="issues">${n} pay problem${n > 1 ? "s" : ""}</button>` : chkByStmt[s.id] ? `<button class="pill warn" data-act="issues">${chkByStmt[s.id]} to check</button>` : pill("ok", "Matches")}</div>`; }).join("") : `<p class="empty">None yet. They're picked up from your Gmail every Monday and Tuesday morning.</p>`}
     <details class="paste"><summary>Paste an email by hand</summary><textarea id="raw" rows="5" placeholder="Paste the whole weekly wages email here"></textarea><div class="acts"><button class="btn" data-act="pastecheck">Add this week</button></div></details>
   </section>`;
 }
@@ -492,7 +496,8 @@ function slipPanel(p) {
   const s = p.slip, refund = s && s.net != null && s.gross != null ? L.round2(s.net - s.gross) : s ? -((+s.paye || 0) + (+s.usc || 0)) : 0;
   const match = !s || s.gross == null ? "" : L.cents(s.gross) === L.cents(p.logged)
     ? `<div class="note good">${ICON.ok}<span>Matches your ${p.lessons.length} lessons${p.stmts.length ? ` and admin's ${p.stmts.length} weekly email${p.stmts.length > 1 ? "s" : ""}` : ""}</span></div>`
-    : `<div class="note bad">${ICON.alert}<span>Your lessons add up to ${eur(p.logged)}, ${eur(Math.abs(p.logged - s.gross))} ${p.logged > s.gross ? "more" : "less"} than the payslip</span></div>`;
+    : p.logged > s.gross ? `<div class="note bad">${ICON.alert}<span>Underpaid: your lessons add up to ${eur(p.logged)}, ${eur(p.logged - s.gross)} more than the payslip</span></div>`
+    : `<div class="note warn">${ICON.alert}<span>Paid ${eur(s.gross - p.logged)} more than your lessons (${eur(p.logged)}). Usually a class or meeting that isn't in your log yet${s.mismatchOk ? ". You've marked it as fine." : `. <button class="link" data-act="slipok" data-pid="${s.id}">It's fine</button>`}</span></div>`;
   const line = (k, v, cls = "") => `<div class="kv ${cls}"><span>${k}</span><span>${v}</span></div>`;
   if (!s) return `<span class="eyebrow">${fmtD(p.start)} – ${fmtD(p.end)}</span><h2>${p.name}</h2>
     ${line("Your lessons", `<b>${eur(p.logged)}</b>`)}${line("Work", `${p.lessons.length} items · ${hrs(p.hours)}`)}${line("Admin's weekly emails", `${p.stmts.length} of ${Math.round(p.weeks)} · ${eur(p.confirmed)}`)}${line(p.status === "open" ? "Paid by" : "Expected by", fmtD(p.due, { day: "numeric", month: "long" }))}
@@ -596,14 +601,14 @@ const dv = id => $("#" + id).value.trim(), dn = id => { const x = dv(id); return
 
 function issuesDlg() {
   const g = issues();
-  openDlg(`<h2>Pay problems</h2><p class="muted small">Only things that change what you're paid are listed here.</p>
-    ${g.length ? g.map(x => `<div class="grp"><div class="row-b"><b>${esc(x.title)}</b><span class="acts">${x.stmt ? `<button class="btn ghost" data-act="draft" data-id="${x.key}">Draft email</button><button class="btn ghost" data-act="sorted" data-id="${x.key}">Mark sorted</button>` : `<button class="btn ghost" data-act="slipok" data-pid="${x.slipId}">It's fine</button>`}</span></div>
-      <ul>${x.list.map(i => `<li>${i.date ? `<span class="muted">${fmtD(i.date)}</span> ` : ""}${esc(i.text)}${i.lessonId ? ` <button class="link" data-act="openlesson" data-lid="${i.lessonId}">Open lesson</button>` : ""}${i.line ? ` <button class="link" data-act="fromline" data-g="${esc(x.key)}" data-i="${x.list.indexOf(i)}">Add it to my lessons</button>` : ""}</li>`).join("")}</ul></div>`).join("") : `<p class="empty">Nothing to look at.</p>`}
+  openDlg(`<h2>Pay check</h2><p class="muted small">Only things that change what you're paid. <span class="pill bad">Problem</span> means you could be paid less than you should; <span class="pill warn">Paid more</span> is just worth a look (often something not in your log yet).</p>
+    ${g.length ? g.map(x => `<div class="grp"><div class="row-b"><b>${esc(x.title)}</b><span class="acts">${x.stmt ? `${x.list.some(i => i.sev !== "warn") ? `<button class="btn ghost" data-act="draft" data-id="${x.key}">Draft email</button>` : ""}<button class="btn ghost" data-act="sorted" data-id="${x.key}">Mark sorted</button>` : `<button class="btn ghost" data-act="slipok" data-pid="${x.slipId}">It's fine</button>`}</span></div>
+      <ul>${x.list.map(i => `<li>${i.sev === "warn" ? pill("warn", "Paid more") : pill("bad", "Problem")} ${i.date ? `<span class="muted">${fmtD(i.date)}</span> ` : ""}${esc(i.text)}${i.lessonId ? ` <button class="link" data-act="openlesson" data-lid="${i.lessonId}">Open lesson</button>` : ""}${i.line ? ` <button class="link" data-act="fromline" data-g="${esc(x.key)}" data-i="${x.list.indexOf(i)}">Add it to my lessons</button>` : ""}</li>`).join("")}</ul></div>`).join("") : `<p class="empty">Nothing to look at.</p>`}
     <div class="acts end"><button class="btn" data-act="close">Close</button></div>`);
 }
 function draftDlg(id) {
   const g = issues().find(x => x.key === id); if (!g) return;
-  const text = `Hi ${PROFILE.adminName || "there"},\n\nI checked the weekly wages for ${g.title.replace("Week of ", "")} against my records and found:\n\n${g.list.map(i => "- " + (i.date ? fmtD(i.date) + ": " : "") + i.text).join("\n")}\n\nCould you take a look when you get a chance?\n\nThanks,\n${(PROFILE.teacherName || "").split(" ")[0] || ""}`;
+  const text = `Hi ${PROFILE.adminName || "there"},\n\nI checked the weekly wages for ${g.title.replace("Week of ", "")} against my records and found:\n\n${g.list.filter(i => i.sev !== "warn").map(i => "- " + (i.date ? fmtD(i.date) + ": " : "") + i.text).join("\n")}\n\nCould you take a look when you get a chance?\n\nThanks,\n${(PROFILE.teacherName || "").split(" ")[0] || ""}`;
   openDlg(`<h2>Email to admin</h2><p class="muted small">Copy this into your email. Nothing is sent from here.</p><textarea id="dtext" rows="12">${esc(text)}</textarea>
     <div class="acts end"><button class="btn ghost" data-act="issues">Back</button><button class="btn primary" data-act="copy">Copy text</button></div>`);
 }
@@ -646,7 +651,7 @@ document.addEventListener("change", e => {
     try {
       const x = await gs("api_readSlipPdf", f.name, String(r.result).split(",")[1]);
       const set = (i, v) => { if (v != null && v !== "" && $("#" + i)) $("#" + i).value = v; };
-      set("q_ps", x.periodStart); set("q_pe", x.periodEnd); set("q_d", x.payDate); set("q_g", x.gross); set("q_n", x.net); set("q_cum", x.cumulativeGross); set("q_pdf", x.pdfUrl);
+      set("q_ps", x.periodStart); set("q_pe", x.periodEnd); set("q_d", x.payDate); set("q_g", x.gross); set("q_n", x.net); set("q_cum", x.cumulativeGross); set("q_paye", x.paye); set("q_usc", x.usc); set("q_pdf", x.pdfUrl);
       // Already have a payslip for that month (e.g. from email)? Update it rather than adding a second one
       if (x.existingId && !btn.dataset.pid) btn.dataset.pid = x.existingId;
       slipText = { pid: btn.dataset.pid || "", text: x.pdfText };

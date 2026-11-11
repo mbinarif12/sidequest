@@ -430,7 +430,7 @@ function api_readSlipPdf(name, base64) {
   return {
     read: parsed.gross != null, existingId: old ? old.id : "", existingName: old && old.periodEnd ? L.periodName(old.periodStart, old.periodEnd) : "",
     payDate, periodStart: period ? period.start : "", periodEnd: period ? period.end : "",
-    gross: parsed.gross, net: parsed.net, cumulativeGross: parsed.cumulativeGross, pdfUrl, pdfText: txt.slice(0, 20000),
+    gross: parsed.gross, net: parsed.net, cumulativeGross: parsed.cumulativeGross, paye: parsed.paye, usc: parsed.usc, pdfUrl, pdfText: txt.slice(0, 20000),
   };
 }
 

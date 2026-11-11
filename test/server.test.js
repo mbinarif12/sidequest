@@ -115,7 +115,7 @@ assert.strictEqual(tds.length, 1); T(`300 copies of a repeated to-do are cleaned
 { // Uploading a payslip PDF by hand (e.g. one that came by WhatsApp)
   const b64 = Buffer.from("%PDF fake").toString("base64");
   const nov = G.api_readSlipPdf("Payslip 12 (30-11-2026).pdf", b64);
-  assert.strictEqual(nov.payDate, "2026-11-30"); assert.ok(nov.read && nov.gross > 0, "amounts read"); assert.strictEqual(nov.existingId, "", "no November payslip yet");
+  assert.strictEqual(nov.payDate, "2026-11-30"); assert.strictEqual(nov.paye, -12.4); assert.strictEqual(nov.usc, -6.1); assert.ok(nov.read && nov.gross > 0, "amounts read"); assert.strictEqual(nov.existingId, "", "no November payslip yet");
   assert.strictEqual(nov.periodEnd, "2026-11-29", "November period: ends on its last Sunday"); assert.ok(nov.pdfUrl, "Drive link filled in");
   assert.ok(!G.readRows_("Payslips").some(x => x.payDate === "2026-11-30"), "nothing saved until you press Save");
   const sep = G.readRows_("Payslips").find(x => x.payDate === "2026-09-30");
