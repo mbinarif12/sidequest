@@ -164,6 +164,16 @@ const L = (() => {
     const cum = text.match(/CUMULATIVE[\s\S]{0,400}?GROSS PAY\s+(\d[\d,]*\.\d{2})/i);
     if (cum) out.cumulativeGross = +cum[1].replace(/,/g, "");
     else { const c2 = text.match(/CUMULATIVE[\s\S]{0,200}?(\d[\d,]*\.\d{2})/i); if (c2 && out.gross != null && +c2[1].replace(/,/g, "") >= out.gross) out.cumulativeGross = +c2[1].replace(/,/g, ""); }
+    // 4) PAYE, PRSI and USC: Sage lists them together in that order, and they add up to the total deductions.
+    //    Look for three numbers in a row that do (negative values are a refund, as printed on the payslip).
+    if (out.deductions != null) {
+      const seq = (text.match(/-?\d{1,3}(?:,\d{3})*\.\d{2}\b|-?\d+\.\d{2}\b/g) || []).map(x => +x.replace(/,/g, ""));
+      for (let i = 0; i + 2 < seq.length; i++) {
+        const [a, b, c] = seq.slice(i, i + 3);
+        if ([a, b, c].some(v => C(v) === C(out.gross))) continue;
+        if (C(Math.abs(a) + Math.abs(b) + Math.abs(c)) === C(Math.abs(out.deductions))) { out.paye = a; out.prsi = b; out.usc = c; break; }
+      }
+    }
     const per = text.match(/PAY PERIOD\s+(\d{1,2})\b/i); if (per) out.period = +per[1];
     out.nums = nums;
     return out;
@@ -222,14 +232,14 @@ const L = (() => {
   // Problems that change what you're paid. Email cosmetics and lesson counters are left out on purpose.
   function moneyIssues(p, students, lessons) {
     const out = [], ic = internalChecks(p), m = matchStatement(p, students, lessons);
-    ic.issues.filter(i => i.sev === "bad").forEach(i => out.push({ text: i.text }));
+    ic.issues.filter(i => i.sev === "bad").forEach(i => out.push({ sev: "bad", text: i.text }));
     m.rows.forEach(r => {
       const who = (r.student && r.student.name) || r.line.label.replace(/Lesson\(\d+\)-\d+\s*/, "").replace(/\b(IE\d+|T\d+)\b/, "").trim().slice(0, 40);
-      if (r.status === "extra") out.push({ date: r.line.date, text: `Admin paid ${who} (€${r.line.subtotal.toFixed(2)}, ${r.line.hours} h × €${r.line.rate}${r.line.code ? ", code " + r.line.code : ""}) but it isn't in your lessons`, amount: r.line.subtotal, line: r.line, studentId: r.student ? r.student.id : "" });
-      r.diffs.filter(d => d.sev === "bad").forEach(d => out.push({ date: r.line.date, text: `${who}: ${d.text}` }));
+      if (r.status === "extra") out.push({ sev: "warn", date: r.line.date, text: `Admin paid ${who} (€${r.line.subtotal.toFixed(2)}, ${r.line.hours} h × €${r.line.rate}${r.line.code ? ", code " + r.line.code : ""}) but it isn't in your lessons`, amount: r.line.subtotal, line: r.line, studentId: r.student ? r.student.id : "" });
+      r.diffs.filter(d => d.sev === "bad").forEach(d => out.push({ sev: "bad", date: r.line.date, text: `${who}: ${d.text}` }));
     });
     const nm = l => ((students.find(s => s.id === l.studentId) || {}).name) || l.label || "A lesson";
-    m.missing.forEach(l => out.push({ date: l.date, lessonId: l.id, text: `${nm(l)} isn't on admin's list (€${amountOf(l).toFixed(2)})`, amount: -amountOf(l) }));
+    m.missing.forEach(l => out.push({ sev: "bad", date: l.date, lessonId: l.id, text: `${nm(l)} isn't on admin's list (€${amountOf(l).toFixed(2)})`, amount: -amountOf(l) }));
     return out;
   }
 

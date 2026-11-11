@@ -69,7 +69,7 @@ a { color: var(--accent); }
 .side { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .amt2 { font: 700 36px var(--f-display); letter-spacing: -.02em; }
 .status { flex-direction: row; align-items: center; gap: 14px; text-align: left; font: inherit; color: inherit; padding: 20px 24px; cursor: pointer; }
-.status:disabled { cursor: default; } .status.good .ico { color: var(--good); } .status.bad { border-color: var(--bad); } .status.bad .ico { color: var(--bad); }
+.status:disabled { cursor: default; } .status.good .ico { color: var(--good); } .status.bad { border-color: var(--bad); } .status.bad .ico { color: var(--bad); } .status.warn { border-color: var(--due); } .status.warn .ico { color: var(--due); }
 .status:not(:disabled):hover { border-color: var(--accent); }
 .periods { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
 .per { font: inherit; color: inherit; text-align: left; border-radius: 14px; padding: 14px; background: var(--bg); border: 2px solid transparent; display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
