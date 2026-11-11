@@ -404,6 +404,36 @@ function handleWeekly_(m, p, body) {
   };
 }
 
+function savePayslipPdf_(blob, name) {
+  const folderName = getSettings_().payslipFolder || "SideQuest payslips";
+  const it = DriveApp.getFoldersByName(folderName);
+  const folder = it.hasNext() ? it.next() : DriveApp.createFolder(folderName);
+  return folder.createFile(blob.setName(name)).getUrl();
+}
+
+// A payslip PDF uploaded on the page (e.g. one that came by WhatsApp): save it to Drive, read it, and send the
+// numbers back so the form fills itself in. Nothing is saved to the Payslips tab until you press Save.
+function api_readSlipPdf(name, base64) {
+  name = String(name || "payslip.pdf");
+  const blob = Utilities.newBlob(Utilities.base64Decode(base64), "application/pdf", name);
+  let txt = ""; try { txt = pdfText_(blob.copyBlob()); } catch (e) { txt = ""; }
+  let parsed = txt ? L.parsePayslip(txt, null) : {};
+  const fm = name.match(/(\d{2})-(\d{2})-(\d{4})/), payDate = (fm ? `${fm[3]}-${fm[2]}-${fm[1]}` : "") || parsed.payDate || "";
+  let period = txt ? L.parsePeriod(txt, payDate ? +payDate.slice(0, 4) : new Date().getFullYear()) : null;
+  const slips = readRows_("Payslips");
+  const old = (period && slips.find(x => x.periodEnd === period.end)) || (payDate && slips.find(x => x.payDate === payDate))
+    || (payDate && slips.find(x => x.payDate && x.payDate.slice(0, 7) === payDate.slice(0, 7))) || null;
+  if (!period && old && old.periodEnd) period = { start: old.periodStart, end: old.periodEnd };
+  if (!period && payDate) { const p = L.periodOfMonth(+payDate.slice(0, 4), +payDate.slice(5, 7) - 1); period = { start: p.start, end: p.end }; }
+  if (txt && period) parsed = L.parsePayslip(txt, expectedGross_(period.start, period.end)); // cross-check against your classes
+  const pdfUrl = old && old.pdfUrl ? old.pdfUrl : savePayslipPdf_(blob.copyBlob(), name);
+  return {
+    read: parsed.gross != null, existingId: old ? old.id : "", existingName: old && old.periodEnd ? L.periodName(old.periodStart, old.periodEnd) : "",
+    payDate, periodStart: period ? period.start : "", periodEnd: period ? period.end : "",
+    gross: parsed.gross, net: parsed.net, cumulativeGross: parsed.cumulativeGross, pdfUrl, pdfText: txt.slice(0, 20000),
+  };
+}
+
 function handlePayslip_(m, body, pdf) {
   let period = L.parsePeriod(body, m.getDate().getFullYear());
   const st = getSettings_();
@@ -411,11 +441,7 @@ function handlePayslip_(m, body, pdf) {
   const known = readRows_("Payslips").find(s => period && s.periodEnd === period.end && s.pdfUrl);
   if (pdf && known) { pdfUrl = known.pdfUrl; try { parsed = L.parsePayslip(pdfText_(pdf.copyBlob()), expectedGross_(period.start, period.end)); } catch (e) { parsed = {}; } }
   else if (pdf) {
-    const folderName = st.payslipFolder || "SideQuest payslips";
-    const it = DriveApp.getFoldersByName(folderName);
-    const folder = it.hasNext() ? it.next() : DriveApp.createFolder(folderName);
-    const saved = folder.createFile(pdf.copyBlob().setName(pdf.getName()));
-    pdfUrl = saved.getUrl();
+    pdfUrl = savePayslipPdf_(pdf.copyBlob(), pdf.getName());
     try { const txt = pdfText_(pdf.copyBlob()); parsed = L.parsePayslip(txt, expectedGross_(period && period.start, period && period.end)); parsed.pdfText = txt.slice(0, 20000); } catch (e) { parsed = { pdfText: "Couldn't convert: " + e.message }; }
   }
   // Match by period, else by pay date. (The number on a Sage payslip is your employee number: the same every month.)

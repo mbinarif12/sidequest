@@ -48,7 +48,7 @@ const ctx = {
   CalendarApp: { getDefaultCalendar: () => ({ getEvents: (a, b) => events.filter(e => e.getStartTime() >= a && e.getStartTime() < b) }), getCalendarById: () => null },
   MailApp: { sendEmail() {} }, Session: { getEffectiveUser: () => ({ getEmail: () => "alex@example.com" }) },
   LockService: { getScriptLock: () => ({ waitLock() {}, tryLock: () => true, releaseLock() {} }) },
-  Utilities: { formatDate: fmt, getUuid: () => Math.random().toString(16).slice(2) },
+  Utilities: { formatDate: fmt, getUuid: () => Math.random().toString(16).slice(2), base64Decode: b => Buffer.from(b, "base64"), newBlob: (bytes, type, name) => ({ getName: () => name, copyBlob() { return { setName() { return this; } }; } }) },
   ScriptApp: { getProjectTriggers: () => [], deleteTrigger() {}, WeekDay: { MONDAY: 1, TUESDAY: 2 }, newTrigger: h => { const t = { timeBased: () => t, onWeekDay: () => t, atHour: () => t, inTimezone: () => t, after: () => t, create() { made.push(h); } }; return t; }, getService: () => ({ getUrl: () => "" }) },
   DriveApp: { getFoldersByName: () => ({ hasNext: () => false }), createFolder: () => ({ createFile: () => ({ getUrl: () => "https://drive.google.com/file/d/X/view" }) }), getFileById: () => ({ setTrashed() {}, getBlob: () => ({}) }) },
   Drive: { Files: { create: () => ({ id: "d" }) } }, DocumentApp: { openById: () => ({ getBody: () => ({ getText: () => slipText }) }) }, MimeType: { GOOGLE_DOCS: "doc" },
@@ -57,7 +57,7 @@ vm.createContext(ctx);
 // The same checks run against the single Code.gs that people paste in by hand (npm test runs both)
 const files = process.env.SQ_RELEASE ? [path.join(__dirname, "..", "release", "Code.gs")] : ["Logic.js", "Code.js"].map(f => path.join(dist, f));
 vm.runInContext(files.map(f => fs.readFileSync(f, "utf8")).join("\n") +
-  "\nthis.__ = { setup, runCheck, api_getAll, api_save, api_week, findOldPayslips_, api_findOldPayslips, oldPayslipsJob, setSetting_, readRows_, upsert_, L };", ctx);
+  "\nthis.__ = { setup, runCheck, api_getAll, api_save, api_week, findOldPayslips_, api_findOldPayslips, oldPayslipsJob, setSetting_, readRows_, upsert_, api_readSlipPdf, L };", ctx);
 const G = ctx.__;
 
 G.setup();
@@ -111,6 +111,16 @@ assert.strictEqual(tds.length, 1); T(`300 copies of a repeated to-do are cleaned
   G.upsert_("Todos", { id: "o1", text: "Old task", done: true, createdAt: "2026-10-01", key: "", doneAt: "2026-11-08T12:00:00Z" });
   const r = G.readRows_("Todos").find(x => x.id === "o1"); assert.strictEqual(r.doneAt, "2026-11-08T12:00:00Z"); assert.strictEqual(r.text, "Old task");
   T("ticking a to-do in an older Sheet adds the new 'done on' column and keeps the date");
+}
+{ // Uploading a payslip PDF by hand (e.g. one that came by WhatsApp)
+  const b64 = Buffer.from("%PDF fake").toString("base64");
+  const nov = G.api_readSlipPdf("Payslip 12 (30-11-2026).pdf", b64);
+  assert.strictEqual(nov.payDate, "2026-11-30"); assert.ok(nov.read && nov.gross > 0, "amounts read"); assert.strictEqual(nov.existingId, "", "no November payslip yet");
+  assert.strictEqual(nov.periodEnd, "2026-11-29", "November period: ends on its last Sunday"); assert.ok(nov.pdfUrl, "Drive link filled in");
+  assert.ok(!G.readRows_("Payslips").some(x => x.payDate === "2026-11-30"), "nothing saved until you press Save");
+  const sep = G.readRows_("Payslips").find(x => x.payDate === "2026-09-30");
+  assert.ok(sep); assert.strictEqual(G.api_readSlipPdf("Payslip 12 (30-09-2026).pdf", b64).existingId, sep.id, "same month updates the existing payslip");
+  T("uploading a payslip PDF reads it and fills in the form, without adding a second payslip for the same month");
 }
 const P = G.L.buildPeriods("2026-09-01", "2026-11-20", [{ periodStart: "2026-08-31", periodEnd: "2026-09-27" }, { periodStart: "2026-09-28", periodEnd: "2026-11-01" }]);
 assert.strictEqual(P.find(p => p.name === "October").weeks, 5); assert.strictEqual(P.find(p => p.name === "November").start, "2026-11-02"); T("pay periods: a 5-week payslip moves the boundary, the rest follow");
