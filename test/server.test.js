@@ -39,6 +39,10 @@ const events = [
   ev("c1", "IE1042 - G12 Maths - Sadhbh", iso(now - 3 * 36e5), iso(now - 1.5 * 36e5)),      // ended → auto-logged
   ev("c2", "Tom - G12 Applied Maths", iso(now + 48 * 36e5), iso(now + 49.5 * 36e5)),        // upcoming, matched by name
   ev("c3", "Lunch", iso(now + 24 * 36e5), iso(now + 25 * 36e5)),                            // not a class
+  ev("c4", "Applied Math Trial Class", iso(now + 26 * 36e5), iso(now + 26.5 * 36e5)),       // trial coming up, no student yet
+  ev("c5", "Parent meeting - Leah", iso(now - 2 * 36e5), iso(now - 2 * 36e5 + 15 * 6e4)),   // ended meeting naming a student
+  ev("c6", "Applied Math / Math Demo", iso(now - 5 * 36e5), iso(now - 4.5 * 36e5)),         // ended trial
+  ev("c7", "PTM Tom", iso(now - 48 * 36e5), iso(now - 47.75 * 36e5)),                        // logged as a class by an older version
 ];
 const fmt = (d, tz, f) => { const z = n => String(n).padStart(2, "0"); const Y = d.getUTCFullYear(), M = z(d.getUTCMonth() + 1), D = z(d.getUTCDate()), h = z(d.getUTCHours()), m = z(d.getUTCMinutes());
   return f === "HH:mm" ? `${h}:${m}` : f === "yyyy-MM-dd" ? `${Y}-${M}-${D}` : `${Y}-${M}-${D} ${h}:${m}`; };
@@ -67,11 +71,24 @@ assert.strictEqual(G.runCheck()[0].result, "Add the address your wages emails co
 demo.students.forEach(s => G.api_save("students", s.id, s));
 demo.lessons.filter(l => l.source === "history").forEach(l => G.api_save("lessons", l.id, l));
 G.setSetting_("senders", "admin@example.com"); G.setSetting_("calendarFrom", "2026-11-01");
+const c7date = fmt(new Date(now - 48 * 36e5), "", "yyyy-MM-dd");
+G.api_save("lessons", "old-ptm", { id: "old-ptm", date: c7date, time: "09:00", studentId: "tom", kind: "class", hours: 0.25, rate: 52.5, number: 11, eventId: "c7@" + c7date, source: "calendar", topic: "", notes: "" });
 d = G.api_getAll();
-const auto = d.lessons.find(l => l.source === "calendar");
+const auto = d.lessons.find(l => l.source === "calendar" && l.kind === "class" && l.id !== "old-ptm");
 assert(auto && auto.studentId === "sadhbh" && auto.hours === 1.5); T("calendar: a class that has ended is logged automatically (matched by course code)");
 assert(d.calendar.planned.some(p => p.studentId === "tom")); T("calendar: upcoming class matched by name");
 assert(d.calendar.unmatched.includes("Lunch")); T("calendar: everyday events are left alone");
+{
+  const trial = d.calendar.planned.find(p => p.title === "Applied Math Trial Class");
+  assert(trial && trial.kind === "demo" && trial.studentId === "" && trial.hours === 0.5); T("calendar: a trial coming up is planned as Demo / trial, even with no student yet");
+  assert(!d.calendar.unmatched.includes("Applied Math Trial Class"));
+  const mtg = d.lessons.find(l => l.label === "Parent meeting - Leah");
+  assert(mtg && mtg.kind === "meeting" && mtg.studentId === "leah" && mtg.hours === 0.25 && !mtg.number); T("calendar: a parent meeting that has ended is logged as a meeting, linked to the student but not a package class");
+  const demoL = d.lessons.find(l => l.label === "Applied Math / Math Demo");
+  assert(demoL && demoL.kind === "demo" && demoL.hours === 0.5 && demoL.rate === 35); T("calendar: an ended demo is logged with the trial rate (30 min at €35/h)");
+  const fixed = d.lessons.find(l => l.id === "old-ptm");
+  assert(fixed.kind === "meeting" && !fixed.number && fixed.label === "PTM Tom"); T("calendar: a meeting logged as a class before is turned into a meeting");
+}
 
 const r = G.runCheck();
 d = G.api_getAll();

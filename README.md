@@ -17,6 +17,7 @@ Mistakes slip in: a class left off a weekly email, half an hour paid instead of 
 ## What it does for you
 
 - **Logs your classes from Google Calendar.** Any event whose title has a student's name or course code becomes a class. Once it has ended, it's logged automatically: no typing.
+- **Knows trials and meetings too.** Events with *trial*, *demo*, *meeting*, *parent* or *report* in the title are planned and logged as that kind of work (at the right rate), never as a package class. A trial that goes well becomes a new student in one click.
 - **Reads the weekly wages email** every Monday and Tuesday morning and matches each line to a class you taught. Only things that change your pay are flagged (wrong hours, wrong rate, a class left off), not cosmetic glitches in the email.
 - **Reads payslip PDFs** straight from your inbox, saves them to Drive, and checks the gross against your classes. It works even when Google's PDF conversion scrambles the columns (it finds gross and net by checking they add up).
 - **Knows the pay calendar.** Pay periods run Monday to the last Sunday of each month (4 or 5 weeks) and money arrives around the 15th of the next month. If a payslip states different dates, those win.

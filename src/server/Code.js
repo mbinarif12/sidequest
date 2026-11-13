@@ -253,7 +253,8 @@ function api_week(mondayISO) {
     const date = Utilities.formatDate(ev.getStartTime(), TZ, "yyyy-MM-dd");
     return { key: ev.getId() + "@" + date, title: ev.getTitle(), allDay: ev.isAllDayEvent(), date,
       start: Utilities.formatDate(ev.getStartTime(), TZ, "HH:mm"), end: Utilities.formatDate(ev.getEndTime(), TZ, "HH:mm"),
-      endDate: Utilities.formatDate(ev.getEndTime(), TZ, "yyyy-MM-dd"), startIso: ev.getStartTime().toISOString(), studentId: s ? s.id : "" };
+      endDate: Utilities.formatDate(ev.getEndTime(), TZ, "yyyy-MM-dd"), startIso: ev.getStartTime().toISOString(), studentId: s ? s.id : "",
+      kind: ev.isAllDayEvent() ? "" : workKind_(ev.getTitle()) };
   });
   return { error: "", events };
 }
@@ -286,6 +287,17 @@ function matchStudent_(title, students) {
   return best;
 }
 
+// Events that are work but not a normal class, recognised by a word in the title
+// ("Applied Math Trial Class", "Maths Demo", "Parent meeting – Jerry", "Write reports")
+const OTHER_KINDS_ = ["meeting", "reports", "prep", "demo", "other"];
+function workKind_(title) {
+  const t = String(title || "").toLowerCase();
+  if (/\b(trial|demo)\b/.test(t)) return "demo";
+  if (/\b(meeting|parent|parents|ptm)\b/.test(t)) return "meeting";
+  if (/\breports?\b/.test(t)) return "reports";
+  return "";
+}
+
 function syncCalendar_() {
   const out = { created: 0, updated: 0, planned: [], unmatched: [], orphans: [], error: "" };
   let cal;
@@ -305,8 +317,9 @@ function syncCalendar_() {
   try { events = cal.getEvents(start, end); } catch (e) { out.error = "Couldn't read your calendar: " + e.message; return out; }
   events.forEach(ev => {
     if (ev.isAllDayEvent()) return;
-    const title = ev.getTitle(), s = matchStudent_(title, students);
+    const title = ev.getTitle(), s = matchStudent_(title, students), kind = workKind_(title);
     const date = Utilities.formatDate(ev.getStartTime(), TZ, "yyyy-MM-dd");
+    if (kind) return workEvent_(ev, kind, title, s, date, { out, lessons, liveKeys, now, from, autoLog });
     if (!s) { if (!seenTitle[title]) { seenTitle[title] = 1; out.unmatched.push(title); } return; }
     // One key per event per day: a recurring series shares an id, and moving a class to another day makes it a new class.
     const key = ev.getId() + "@" + date;
@@ -341,6 +354,32 @@ function syncCalendar_() {
   out.orphans = lessons.filter(l => l.eventId && l.eventId !== "kept" && l.date >= from && new Date(l.date + "T00:00:00Z") >= start && new Date(l.date + "T00:00:00Z") < end && !liveKeys[l.eventId] && l.kind !== "cancelled").map(l => l.id);
   out.planned.sort((a, b) => a.start.localeCompare(b.start));
   return out;
+}
+// A trial, meeting or reports event: planned until it ends, then logged as other work (on the claim straight away).
+// If it names a student it stays linked to them, but never counts as one of their package classes.
+function workEvent_(ev, kind, title, s, date, c) {
+  const key = ev.getId() + "@" + date; c.liveKeys[key] = 1;
+  const time = Utilities.formatDate(ev.getStartTime(), TZ, "HH:mm");
+  const hours = Math.round((ev.getEndTime() - ev.getStartTime()) / 9e5) / 4 || 1;
+  const linked = c.lessons.find(l => l.eventId === key || (l.eventId && l.eventId.indexOf(ev.getId() + "@") === 0 && l.date === date));
+  const plan = extra => c.out.planned.push({ eventId: key, studentId: s ? s.id : "", kind, label: title, date, time, hours, start: ev.getStartTime().toISOString(), title, lessonId: "", ...extra });
+  if (linked) {
+    // Logged as a class before SideQuest knew these words (e.g. a parent meeting with the student's name): fix it, unless you've written it up
+    if (linked.kind === "class" && linked.source === "calendar" && !linked.topic && !linked.notes) {
+      const upd = { ...linked, kind, label: title, number: "", rate: rateFor_(kind, date, null), updatedAt: new Date().toISOString() };
+      upsert_("Lessons", upd); Object.assign(linked, upd); c.out.updated++;
+    } else if (OTHER_KINDS_.indexOf(linked.kind) >= 0 && !linked.studentId && s) { // the student was added after the event was logged
+      const upd = { ...linked, studentId: s.id }; upsert_("Lessons", upd); Object.assign(linked, upd);
+    }
+    return;
+  }
+  if (ev.getEndTime() > c.now) return plan(ev.getStartTime() <= c.now ? { started: true } : {});
+  if (date < c.from) return;
+  if (!c.autoLog) return plan({ past: true });
+  const l = { id: "cal-" + Utilities.getUuid().slice(0, 8), date, time, studentId: s ? s.id : "", label: title, kind, hours,
+    rate: rateFor_(kind, date, null), number: "", topic: "", homework: "", notes: "", followups: "", followupsDone: false,
+    updatedAt: new Date().toISOString(), eventId: key, source: "calendar" };
+  upsert_("Lessons", l); c.lessons.push(l); c.out.created++;
 }
 function nextNumber_(s, lessons) {
   const ls = lessons.filter(l => l.studentId === s.id && l.kind === "class").sort((a, b) => a.date.localeCompare(b.date));

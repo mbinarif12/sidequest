@@ -77,7 +77,7 @@ function rateFor(kind, date, sid) {
 const nowMs = () => Date.now(); // the viewer's clock
 const startMs = p => p.start ? Date.parse(p.start) : Date.parse(p.date + "T" + (p.time || "00:00") + ":00");
 const hasStarted = p => startMs(p) <= nowMs();
-const booked = sid => CAL.error ? 0 : CAL.planned.filter(p => p.studentId === sid && !p.lessonId).length;
+const booked = sid => CAL.error ? 0 : CAL.planned.filter(p => p.studentId === sid && !p.lessonId && !p.kind).length;
 
 // ---- Derived data ----
 function lessonsDone(s) {
@@ -141,7 +141,7 @@ function packageInfo(s) {
   let i = ls.length - 1; while (i >= 0 && +ls[i].number !== 1) i--;
   const startedOn = i >= 0 ? ls[i].date : (ls[0] ? ls[0].date : "start");
   const left = s.pkgSize - lessonsDone(s);
-  const upcomingCls = CAL.error ? [] : CAL.planned.filter(p => p.studentId === s.id && !p.lessonId).sort((a, b) => a.start.localeCompare(b.start));
+  const upcomingCls = CAL.error ? [] : CAL.planned.filter(p => p.studentId === s.id && !p.lessonId && !p.kind).sort((a, b) => a.start.localeCompare(b.start));
   const last = left > 0 ? upcomingCls[left - 1] : null; // the booked class that will be the package's last
   return { left, startedOn, lastDate: last ? last.date : "", key: `${s.id}-${startedOn}` };
 }
@@ -273,7 +273,7 @@ function vHome() {
     <div class="periods">${strip}</div></section>
   <section class="split3">
     <div class="card"><div class="row-b"><h2>Coming up</h2><button class="link" data-act="nav" data-v="lessons">Open calendar</button></div>
-      ${up.length ? up.map(p => { const s = stu(p.studentId); return `<div class="li"><div class="date"><span>${dow(p.date)}</span><b>${+p.date.slice(8)}</b></div><div class="grow"><b>${esc(s?.name)} · ${esc((s?.subject || "").replace(/\s*\(H\)/, ""))}</b><div class="muted small">${esc(p.time)} · ${hrs(p.hours)}${nextNumber(p.studentId) && s?.pkgSize ? ` · lesson ${nextNumber(p.studentId)} of ${s.pkgSize}` : ""}</div></div><div class="num b">${eur(L.round2(p.hours * rateFor("class", p.date, p.studentId)))}</div></div>`; }).join("")
+      ${up.length ? up.map(p => { const s = stu(p.studentId); if (p.kind) return `<div class="li"><div class="date"><span>${dow(p.date)}</span><b>${+p.date.slice(8)}</b></div><div class="grow"><b>${esc(p.label || KINDS[p.kind])}</b><div class="muted small">${esc(p.time)} · ${hrs(p.hours)} · ${KINDS[p.kind]}</div></div><div class="num b">${eur(L.round2(p.hours * rateFor(p.kind, p.date)))}</div></div>`; return `<div class="li"><div class="date"><span>${dow(p.date)}</span><b>${+p.date.slice(8)}</b></div><div class="grow"><b>${esc(s?.name)} · ${esc((s?.subject || "").replace(/\s*\(H\)/, ""))}</b><div class="muted small">${esc(p.time)} · ${hrs(p.hours)}${nextNumber(p.studentId) && s?.pkgSize ? ` · lesson ${nextNumber(p.studentId)} of ${s.pkgSize}` : ""}</div></div><div class="num b">${eur(L.round2(p.hours * rateFor("class", p.date, p.studentId)))}</div></div>`; }).join("")
         : `<p class="empty">${CAL.error ? "Connect your calendar to see upcoming lessons." : "Nothing in your calendar for the next two weeks."}</p>`}</div>
     <div class="card"><div class="row-b"><h2>To do</h2>${allTd.length > td.length ? `<span class="muted small">${allTd.length - td.length} more</span>` : ""}</div>
       <form class="addtodo" data-form="todo"><label for="newtodo" class="sr">New to-do</label><textarea id="newtodo" rows="1" placeholder="Add your own to-do, e.g. Make an exam for Sadhbh"></textarea><button class="btn" type="submit">Add</button></form>
@@ -315,6 +315,12 @@ function weekBlocks(ws) {
     if (ev.date < ws || ev.date > we) return;
     if (ev.allDay) { allDay.push({ other: true, date: ev.date, title: ev.title }); return; }
     const end = ev.endDate > ev.date ? "23:59" : ev.end;
+    if (ev.kind) { // trial, meeting, reports: work, but not a package class
+      const l = lessons.find(x => !used.has(x.id) && x.eventId === ev.key); if (l) used.add(l.id);
+      blocks.push({ work: true, date: ev.date, start: ev.start, end, title: ev.title, studentId: ev.studentId, lesson: l,
+        planned: l ? null : { eventId: ev.key, studentId: ev.studentId, kind: ev.kind, label: ev.title, date: ev.date, time: ev.start, hours: Math.round((toMin(end) - toMin(ev.start)) / 15) / 4, start: ev.startIso } });
+      return;
+    }
     if (!ev.studentId) { blocks.push({ other: true, date: ev.date, start: ev.start, end, title: ev.title }); return; }
     const l = lessons.find(x => !used.has(x.id) && x.eventId === ev.key) || lessons.find(x => !used.has(x.id) && x.studentId === ev.studentId && x.date === ev.date);
     if (l) used.add(l.id);
@@ -343,6 +349,11 @@ function blockHtml(b, h0) {
   const pos = `top:${top}px;height:${ht}px;left:calc(${(b.col / b.ncol) * 100}% + 2px);width:calc(${100 / b.ncol}% - 6px)`;
   const tm = `${b.start}–${b.end === "23:59" ? "" : b.end}`;
   if (b.other) return `<div class="ev other" style="${pos}" title="${esc(b.title)}"><b>${esc(b.title)}</b><span>${tm}</span></div>`;
+  if (b.work || (b.lesson && OTHER_KINDS.includes(b.lesson.kind))) {
+    const l = b.lesson, st = l ? "done" : hasStarted(b.planned) ? "need" : "plan", k = l ? l.kind : b.planned.kind;
+    const act = l ? `data-act="pick" data-lid="${l.id}"` : `data-act="pickplan" data-eid="${esc(b.planned.eventId)}"`;
+    return `<button class="ev cw ${st}" style="${pos}" ${act} title="${esc(b.title || l?.label || "")}"><b>${esc(b.title || l?.label || KINDS[k])}</b><span>${tm} · ${st === "plan" ? "Coming up" : st === "need" ? "In progress" : "✓ " + KINDS[k]}</span></button>`;
+  }
   const s = stu(b.studentId), l = b.lesson;
   const subj = esc((s?.subject || "").replace(/\s*\(H\)/, ""));
   let state = "plan", note = "Coming up";
@@ -389,7 +400,7 @@ function vLessons() {
     </div></div></div>`;
   return `<div class="row-b"><div><h1>${title}</h1><div class="muted">${ls.length} class${ls.length === 1 ? "" : "es"} logged · ${hrs(sum(ls, l => +l.hours || 0))} · ${eur(sum(ls, L.amountOf))}${W.loading ? " · loading your calendar…" : W.error ? " · calendar not connected, showing usual times" : ""}</div></div>
     <div class="acts"><button class="btn" data-act="other">+ Other work</button><button class="btn sq" data-act="wk" data-n="-7" aria-label="Previous week">‹</button><button class="btn" data-act="wk" data-n="0">Today</button><button class="btn sq" data-act="wk" data-n="7" aria-label="Next week">›</button></div></div>
-  <section class="card flush">${grid}<div class="legend small muted"><span><i class="lg done c1"></i>Done</span><span><i class="lg need c1"></i>Taught, needs notes</span><span><i class="lg plan c1"></i>Coming up</span><span><i class="lg other"></i>Other events</span><span class="sep"></span>${[...new Set(S.students.filter(s => s.active).map(s => subjectKey(s.subject)))].map(k => { const s = S.students.find(x => subjectKey(x.subject) === k); return `<span><i class="lg done ${subjectColor(s.subject)}"></i>${esc(subjectName(s.subject))}</span>`; }).join("")}</div></section>
+  <section class="card flush">${grid}<div class="legend small muted"><span><i class="lg done c1"></i>Done</span><span><i class="lg need c1"></i>Taught, needs notes</span><span><i class="lg plan c1"></i>Coming up</span><span><i class="lg done cw"></i>Trial, meeting or reports</span><span><i class="lg other"></i>Other events</span><span class="sep"></span>${[...new Set(S.students.filter(s => s.active).map(s => subjectKey(s.subject)))].map(k => { const s = S.students.find(x => subjectKey(x.subject) === k); return `<span><i class="lg done ${subjectColor(s.subject)}"></i>${esc(subjectName(s.subject))}</span>`; }).join("")}</div></section>
   ${CAL.unmatched.length ? `<p class="muted small">Calendar events that aren't classes are shown in grey. If one of them is a class, open the student on the Students page and add a word from its title to their calendar keyword.</p>` : ""}`;
 }
 // A student's past classes, newest first, the way your Excel tabs show them
@@ -408,6 +419,7 @@ function openPanel() {
 function panelModel() {
   if (!sel) return null;
   if (sel.lessonId) { const l = S.lessons.find(x => x.id === sel.lessonId); return l ? { ...l } : null; }
+  if (sel.planned && sel.planned.kind) { const p = sel.planned; return { studentId: p.studentId || "", label: p.label, date: p.date, time: p.time, hours: p.hours, rate: rateFor(p.kind, p.date), kind: p.kind, eventId: p.eventId, _new: true, _other: true, _locked: !hasStarted(p) }; }
   if (sel.planned) { const p = sel.planned; return { studentId: p.studentId, date: p.date, time: p.time, hours: p.hours, rate: rateFor("class", p.date, p.studentId), kind: "", number: nextNumber(p.studentId), eventId: String(p.eventId).indexOf("slot-") === 0 ? "" : p.eventId, _new: true, _locked: !hasStarted(p) }; }
   if (sel.fromLine) { const f = sel.fromLine; return { ...f, _new: true, _other: !f.studentId }; }
   if (sel.other) return { studentId: "", label: "", date: TODAY, time: "", hours: 1, rate: rateFor("meeting", TODAY), kind: "meeting", _new: true, _other: true };
@@ -418,12 +430,17 @@ function panel() {
   if (!m) return `<p class="empty">Pick a lesson to add notes or mark it taught.</p>`;
   const isOther = m._other || (!m.studentId && m.kind !== "class");
   const s = stu(m.studentId);
+  if (m._locked && m._other) return `<span class="eyebrow">${fmtD(m.date, { weekday: "long", day: "numeric", month: "short" })}${m.time ? " · " + esc(m.time) : ""}</span><h2>${esc(m.label || KINDS[m.kind])}</h2>
+    ${line2("Type", KINDS[m.kind])}${s ? line2("Student", esc(s.name)) : ""}${line2("Length", hrs(m.hours))}${line2("Pay", `${hrs(m.hours)} × ${eur(m.rate)} = ${eur(L.round2(m.hours * m.rate))}`)}
+    <div class="note soft">Coming up. Once it's over, it's logged automatically and goes on your Payment claim.</div>
+    <p class="muted small">To move or cancel it, change it in Google Calendar, then press Sync calendar.</p>
+    <div class="acts end">${m.kind === "demo" && !s ? `<button class="btn" data-act="trialstu" data-t="${esc(m.label)}">Make them a student</button>` : ""}<button class="btn" data-act="close">Close</button></div>`;
   if (m._locked) return `<span class="eyebrow">${fmtD(m.date, { weekday: "long", day: "numeric", month: "short" })}${m.time ? " · " + esc(m.time) : ""}</span><h2>${esc(s?.name || "")} · ${esc((s?.subject || "").replace(/\s*\(H\)/, ""))}</h2>
     ${line2("Lesson", m.number && s?.pkgSize ? `${m.number} of ${s.pkgSize}` : "—")}${line2("Length", hrs(m.hours))}${line2("Pay", eur(L.round2(m.hours * m.rate)))}
     <div class="note soft">You can add notes once this class starts at ${esc(m.time)} on ${fmtD(m.date, { weekday: "short", day: "numeric", month: "short" })}.</div>
     <p class="muted small">To move or cancel it, change it in Google Calendar, then press Sync calendar.</p><div class="acts end"><button class="btn" data-act="close">Close</button></div>`;
   const orphan = m.id && CAL.orphans.includes(m.id) ? `<div class="note warn">${ICON.alert}<span>This class is no longer in your calendar. Was it cancelled or moved?</span></div><div class="acts"><button class="btn" data-act="orphankeep" data-lid="${m.id}">Keep it, it happened</button><button class="btn ghost danger" data-act="orphandel" data-lid="${m.id}">Remove it</button></div>` : "";
-  const head = isOther ? `<span class="eyebrow">${m._new ? "Add other work" : fmtD(m.date, { weekday: "long", day: "numeric", month: "short" })}</span><h2>${esc(m.label || KINDS[m.kind])}</h2>`
+  const head = isOther ? `<span class="eyebrow">${m._new && !m.eventId ? "Add other work" : fmtD(m.date, { weekday: "long", day: "numeric", month: "short" })}</span><h2>${esc(m.label || KINDS[m.kind])}</h2>${m.kind === "demo" && !m.studentId ? `<button class="link" data-act="trialstu" data-t="${esc(m.label)}">Trial went well? Make them a student</button>` : ""}`
     : `<span class="eyebrow">${fmtD(m.date, { weekday: "long", day: "numeric", month: "short" })}${m.time ? " · " + esc(m.time) : ""}</span><h2>${esc(s?.name || "")}${m.number ? " · lesson " + m.number : ""}</h2>`;
   const status = isOther ? `<div class="f2">
       <label class="fld">Type<select id="p_kind">${OTHER_KINDS.map(k => `<option value="${k}" ${k === m.kind ? "selected" : ""}>${KINDS[k]}</option>`).join("")}</select></label>
@@ -518,7 +535,7 @@ function slipPanel(p) {
 // ---- Payment Claim: like your Excel tab. A class appears once you've taught it and entered its details. ----
 let claimFilter = "all";
 const SESSION = { class: "Class", noshow: "No-show (part pay)", demo: "Demo / trial", meeting: "Meeting", reports: "Student reports", prep: "Lesson prep", other: "Other" };
-const onClaim = l => l.kind !== "cancelled" && (l.source === "history" || !l.studentId || !!(l.topic || l.notes));
+const onClaim = l => l.kind !== "cancelled" && (l.source === "history" || !l.studentId || OTHER_KINDS.includes(l.kind) || !!(l.topic || l.notes));
 const claimLabel = l => l.studentId ? `${(stu(l.studentId)?.subject || "").replace(/\s*\(H\)/, "")} – ${nameOf(l)}` : (l.label || SESSION[l.kind]);
 function claimData() {
   const per = periods(), rows = S.lessons.filter(onClaim).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
@@ -697,6 +714,11 @@ document.addEventListener("click", async e => {
   if (a === "pick") { sel = { lessonId: D.lid }; panelKind = null; return openPanel(); }
   if (a === "pickplan") { const b = weekBlocks(weekStart).blocks.find(x => x.planned && x.planned.eventId === D.eid); if (!b) return; sel = { planned: b.planned }; panelKind = null; return openPanel(); }
   if (a === "other") { sel = { other: true }; panelKind = null; return openPanel(); }
+  if (a === "trialstu") { // guess the subject and name from the event title, e.g. "Applied Math Trial Class – Aoife"
+    const t = String(D.t || ""), subject = /applied/i.test(t) ? "Applied Maths" : /math/i.test(t) ? "Maths" : "";
+    const name = t.replace(/\b(applied|maths?|trial|demo|class|lesson|session|online)\b/gi, " ").replace(/[–—\-\/|:·()]+/g, " ").replace(/\s+/g, " ").trim();
+    dlg().close(); return studentDlg({ name, subject, active: true });
+  }
   if (a === "openlesson") { const l = S.lessons.find(x => x.id === D.lid); if (!l) return; sel = { lessonId: l.id }; panelKind = null; return openPanel(); }
   if (a === "kind") {
     const prev = panelKind || panelModel()?.kind; panelKind = D.k; t.parentElement.querySelectorAll("button").forEach(b => b.classList.toggle("on", b === t));
