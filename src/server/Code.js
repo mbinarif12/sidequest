@@ -288,7 +288,7 @@ function matchStudent_(title, students) {
 }
 
 // Events that are work but not a normal class, recognised by a word in the title
-// ("Applied Math Trial Class", "Maths Demo", "Parent meeting – Jerry", "Write reports")
+// ("Applied Math Trial Class", "Maths Demo", "Parent meeting – Ella", "Write reports")
 const OTHER_KINDS_ = ["meeting", "reports", "prep", "demo", "other"];
 function workKind_(title) {
   const t = String(title || "").toLowerCase();

@@ -443,7 +443,7 @@ function panel() {
   if (m._locked) return `<span class="eyebrow">${fmtD(m.date, { weekday: "long", day: "numeric", month: "short" })}${m.time ? " · " + esc(m.time) : ""}</span><h2>${esc(s?.name || "")} · ${esc((s?.subject || "").replace(/\s*\(H\)/, ""))}</h2>
     ${line2("Lesson", m.number && s?.pkgSize ? `${m.number} of ${s.pkgSize}` : "—")}${line2("Length", hrs(m.hours))}${line2("Pay", eur(L.round2(m.hours * m.rate)))}
     <div class="note soft">You can add notes once this class starts at ${esc(m.time)} on ${fmtD(m.date, { weekday: "short", day: "numeric", month: "short" })}.</div>
-    <div id="skipbox" hidden><label class="fld">Why is it skipped?<textarea id="p_skip" rows="2" placeholder="e.g. Jessie is away on a school trip"></textarea></label>
+    <div id="skipbox" hidden><label class="fld">Why is it skipped?<textarea id="p_skip" rows="2" placeholder="e.g. Away on a school trip"></textarea></label>
       <p class="muted small">A skipped class pays nothing and doesn't use up a lesson from the package.</p></div>
     <p class="muted small" id="skiphint">Not happening? Mark it skipped here (it stays in your calendar), or move it in Google Calendar and press Sync calendar.</p>
     <div class="acts end"><button class="btn ghost" data-act="close">Close</button><button class="btn" id="skipbtn" data-act="skipopen">Skip this class</button><button class="btn primary" id="skipsave" data-act="skipsave" hidden>Mark as skipped</button></div>`;
