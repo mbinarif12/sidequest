@@ -145,6 +145,9 @@ function packageInfo(s) {
   const last = left > 0 ? upcomingCls[left - 1] : null; // the booked class that will be the package's last
   return { left, startedOn, lastDate: last ? last.date : "", key: `${s.id}-${startedOn}` };
 }
+// Package used up and no more classes booked: they show under Finished on their own (they come back if you book more)
+const pkgFinished = s => { if (!s.active || !s.pkgSize || CAL.error) return false; const p = packageInfo(s); return !!p && p.left <= 0 && !booked(s.id); };
+const isCurrent = s => s.active && !pkgFinished(s);
 function packageAlerts() {
   return S.students.filter(s => s.active && s.pkgSize).map(s => ({ s, p: packageInfo(s) }))
     .filter(x => x.p && x.p.left >= 0 && (x.p.lastDate ? x.p.lastDate <= L.addDays(TODAY, 7) : x.p.left <= 1));
@@ -364,7 +367,7 @@ function blockHtml(b, h0) {
 }
 function studentsCard() {
   return `<section class="card"><div class="row-b"><h2>Students</h2><button class="btn" data-act="newstu">Add student</button></div>
-    <div class="studs">${S.students.filter(s => s.active).map(s => {
+    <div class="studs">${S.students.filter(isCurrent).map(s => {
       const d = lessonsDone(s), left = s.pkgSize ? s.pkgSize - d : null, pct = s.pkgSize ? Math.min(100, Math.round(d / s.pkgSize * 100)) : 0;
       return `<button class="stud" data-act="student" data-sid="${s.id}"><span class="row-b"><b>${esc(s.name)}</b>${left != null ? `<span class="small ${left <= 2 ? "due-t" : "muted"} b">${left > 0 ? left + " left" : "finished"}</span>` : ""}</span>
         <span class="bar"><i class="${left != null && left <= 2 ? "low" : ""}" style="width:${pct}%"></i></span>
@@ -373,10 +376,12 @@ function studentsCard() {
   </section>`;
 }
 function vStudents() {
-  const inactive = S.students.filter(s => !s.active);
+  const inactive = S.students.filter(s => !isCurrent(s));
+  const lastOf = s => S.lessons.filter(l => l.studentId === s.id && l.kind !== "cancelled").reduce((a, l) => l.date > a ? l.date : a, "");
   return `<div><h1>Students</h1><div class="muted">Click a student to see every class with your notes, or to change their details.</div></div>
   ${studentsCard()}
-  ${inactive.length ? `<section class="card"><h2>Finished</h2><div class="studs">${inactive.map(s => `<button class="stud" data-act="student" data-sid="${s.id}"><b>${esc(s.name)}</b><span class="muted small">${esc(s.subject.replace(/\s*\(H\)/, ""))}</span></button>`).join("")}</div></section>` : ""}`;
+  ${inactive.length ? `<section class="card"><h2>Finished</h2><div class="studs">${inactive.map(s => `<button class="stud" data-act="student" data-sid="${s.id}"><b>${esc(s.name)}</b><span class="muted small">${esc(s.subject.replace(/\s*\(H\)/, ""))}${lastOf(s) ? " · last class " + fmtD(lastOf(s), { day: "numeric", month: "short", year: "numeric" }) : ""}</span></button>`).join("")}</div>
+    <p class="muted small">Students move here once their package is used up and no more classes are booked. Book a new class in your calendar and they move back.</p></section>` : ""}`;
 }
 function vLessons() {
   const we = L.addDays(weekStart, 6);
@@ -438,7 +443,10 @@ function panel() {
   if (m._locked) return `<span class="eyebrow">${fmtD(m.date, { weekday: "long", day: "numeric", month: "short" })}${m.time ? " · " + esc(m.time) : ""}</span><h2>${esc(s?.name || "")} · ${esc((s?.subject || "").replace(/\s*\(H\)/, ""))}</h2>
     ${line2("Lesson", m.number && s?.pkgSize ? `${m.number} of ${s.pkgSize}` : "—")}${line2("Length", hrs(m.hours))}${line2("Pay", eur(L.round2(m.hours * m.rate)))}
     <div class="note soft">You can add notes once this class starts at ${esc(m.time)} on ${fmtD(m.date, { weekday: "short", day: "numeric", month: "short" })}.</div>
-    <p class="muted small">To move or cancel it, change it in Google Calendar, then press Sync calendar.</p><div class="acts end"><button class="btn" data-act="close">Close</button></div>`;
+    <div id="skipbox" hidden><label class="fld">Why is it skipped?<textarea id="p_skip" rows="2" placeholder="e.g. Jessie is away on a school trip"></textarea></label>
+      <p class="muted small">A skipped class pays nothing and doesn't use up a lesson from the package.</p></div>
+    <p class="muted small" id="skiphint">Not happening? Mark it skipped here (it stays in your calendar), or move it in Google Calendar and press Sync calendar.</p>
+    <div class="acts end"><button class="btn ghost" data-act="close">Close</button><button class="btn" id="skipbtn" data-act="skipopen">Skip this class</button><button class="btn primary" id="skipsave" data-act="skipsave" hidden>Mark as skipped</button></div>`;
   const orphan = m.id && CAL.orphans.includes(m.id) ? `<div class="note warn">${ICON.alert}<span>This class is no longer in your calendar. Was it cancelled or moved?</span></div><div class="acts"><button class="btn" data-act="orphankeep" data-lid="${m.id}">Keep it, it happened</button><button class="btn ghost danger" data-act="orphandel" data-lid="${m.id}">Remove it</button></div>` : "";
   const head = isOther ? `<span class="eyebrow">${m._new && !m.eventId ? "Add other work" : fmtD(m.date, { weekday: "long", day: "numeric", month: "short" })}</span><h2>${esc(m.label || KINDS[m.kind])}</h2>${m.kind === "demo" && !m.studentId ? `<button class="link" data-act="trialstu" data-t="${esc(m.label)}">Trial went well? Make them a student</button>` : ""}`
     : `<span class="eyebrow">${fmtD(m.date, { weekday: "long", day: "numeric", month: "short" })}${m.time ? " · " + esc(m.time) : ""}</span><h2>${esc(s?.name || "")}${m.number ? " · lesson " + m.number : ""}</h2>`;
@@ -468,6 +476,7 @@ function collectPanel() {
   if (panelKind) d.kind = panelKind;
   if (m._other || $("#p_kind")) { d.kind = v("p_kind"); d.label = v("p_label") || KINDS[d.kind]; d.date = v("p_date") || d.date; d.studentId = ""; }
   if (!d.kind) d.kind = "class";
+  if (d.kind === "cancelled") d.number = null;
   const set = (k, x) => { if (x !== undefined) d[k] = x; };
   set("hours", n("p_hours")); set("rate", n("p_rate")); set("number", n("p_num"));
   set("topic", v("p_topic")); set("homework", v("p_hw")); set("notes", v("p_notes")); set("followups", v("p_fu"));
@@ -714,6 +723,15 @@ document.addEventListener("click", async e => {
   if (a === "pick") { sel = { lessonId: D.lid }; panelKind = null; return openPanel(); }
   if (a === "pickplan") { const b = weekBlocks(weekStart).blocks.find(x => x.planned && x.planned.eventId === D.eid); if (!b) return; sel = { planned: b.planned }; panelKind = null; return openPanel(); }
   if (a === "other") { sel = { other: true }; panelKind = null; return openPanel(); }
+  if (a === "skipopen") { $("#skipbox").hidden = false; $("#skipsave").hidden = false; $("#skipbtn").hidden = true; $("#skiphint").hidden = true; return $("#p_skip").focus(); }
+  if (a === "skipsave") { // a class that won't happen: €0, no lesson number, linked to the event so the calendar doesn't log it later
+    const m = panelModel(), why = ($("#p_skip").value || "").trim();
+    const l = { date: m.date, time: m.time, studentId: m.studentId, kind: "cancelled", hours: m.hours, rate: m.rate, number: null, topic: "", homework: "",
+      notes: why ? "Skipped: " + why : "Skipped", followups: "", eventId: m.eventId || "", source: "calendar", updatedAt: new Date().toISOString() };
+    dlg().close(); sel = null; await save("lessons", "skip-" + uid(), l);
+    const p = CAL.planned.find(x => x.eventId === m.eventId); if (p) p.lessonId = "pending";
+    return toast("Class skipped: no pay, and the package count is unchanged");
+  }
   if (a === "trialstu") { // guess the subject and name from the event title, e.g. "Applied Math Trial Class – Aoife"
     const t = String(D.t || ""), subject = /applied/i.test(t) ? "Applied Maths" : /math/i.test(t) ? "Maths" : "";
     const name = t.replace(/\b(applied|maths?|trial|demo|class|lesson|session|online)\b/gi, " ").replace(/[–—\-\/|:·()]+/g, " ").replace(/\s+/g, " ").trim();
