@@ -1,5 +1,5 @@
 // ---- SideQuest web page: Home, Lessons, Payslips, Payment claim, Profile ----
-const S = { students: [], lessons: [], statements: [], payslips: [], todos: [] };
+const S = { students: [], lessons: [], statements: [], payslips: [], todos: [], overrides: [] };
 const COLS = Object.keys(S);
 let STATUS = {}, searchPoll = null, searchWasRunning = false;
 // While the background payslip search runs, check every 20 s and say when it's done
@@ -87,7 +87,9 @@ function lessonsDone(s) {
 }
 function nextNumber(sid) { const s = stu(sid); if (!s) return null; const d = lessonsDone(s); return s.pkgSize && d >= s.pkgSize ? 1 : d + 1; }
 const inRange = (a, b) => S.lessons.filter(l => l.date >= a && l.date <= b);
-const stmtTotal = st => sum(st.lines || [], l => l.subtotal);
+// Manual overrides: a flag you handled by hand, with your reason (and, for an email line, the amount it should count as)
+const ovrOf = key => (S.overrides || []).find(o => o.key === key);
+const stmtTotal = st => sum(st.lines || [], l => { const o = ovrOf(`${st.id}#L:${L.lineKey(l)}`); return o && o.amount != null && o.amount !== "" ? +o.amount : l.subtotal; });
 
 function periods() {
   if (!TODAY) return [];
@@ -99,17 +101,23 @@ function periods() {
     return { ...p, lessons: ls, logged: sum(ls, L.amountOf), hours: sum(ls, l => +l.hours || 0), stmts, confirmed: sum(stmts, stmtTotal), status };
   });
 }
+// Each group: flags still open (list) and the ones you handled by hand (handled), each with its override
 function issues() {
   const out = [];
-  S.statements.filter(s => !s.resolved && s.week).sort((a, b) => b.week.start.localeCompare(a.week.start)).forEach(st => {
-    const list = L.moneyIssues({ week: st.week, lines: st.lines || [], totalHours: st.totalHours, totalAmount: st.totalAmount }, S.students, S.lessons);
-    if (list.length) out.push({ key: st.id, stmt: st, title: `Week of ${fmtD(st.week.start)} – ${fmtD(st.week.end)}`, list });
+  const split = (g, items, legacy) => {
+    items.forEach(i => { i.okey = `${g.key}#${i.key}`; i.ovr = ovrOf(i.okey) || (legacy ? { legacy: true, reason: legacy } : null); });
+    g.list = items.filter(i => !i.ovr); g.handled = items.filter(i => i.ovr);
+    if (g.list.length || g.handled.length) out.push(g);
+  };
+  S.statements.filter(s => s.week).sort((a, b) => b.week.start.localeCompare(a.week.start)).forEach(st => {
+    const items = L.moneyIssues({ week: st.week, lines: st.lines || [], totalHours: st.totalHours, totalAmount: st.totalAmount }, S.students, S.lessons);
+    split({ key: st.id, stmt: st, title: `Week of ${fmtD(st.week.start)} – ${fmtD(st.week.end)}` }, items, st.resolved ? "Marked as sorted (before reasons could be added)" : "");
   });
   periods().forEach(p => {
-    if (p.slip && p.slip.gross != null && p.lessons.length && L.cents(p.slip.gross) !== L.cents(p.logged) && !p.slip.mismatchOk)
-      out.push({ key: p.slip.id, slipId: p.slip.id, title: `${p.name} payslip`, list: [p.slip.gross < p.logged
+    if (p.slip && p.slip.gross != null && p.lessons.length && L.cents(p.slip.gross) !== L.cents(p.logged))
+      split({ key: "slip-" + p.slip.id, slipId: p.slip.id, title: `${p.name} payslip` }, [p.slip.gross < p.logged
         ? { sev: "bad", text: `Payslip says ${eur(p.slip.gross)}, your lessons add up to ${eur(p.logged)}: ${eur(p.logged - p.slip.gross)} short` }
-        : { sev: "warn", text: `Payslip says ${eur(p.slip.gross)}, ${eur(p.slip.gross - p.logged)} more than your lessons (${eur(p.logged)}). Usually a class or meeting that isn't in your log yet.` }] });
+        : { sev: "warn", text: `Payslip says ${eur(p.slip.gross)}, ${eur(p.slip.gross - p.logged)} more than your lessons (${eur(p.logged)}). Usually a class or meeting that isn't in your log yet.` }].map(i => ({ ...i, key: "gross" })), p.slip.mismatchOk ? "Marked as fine (before reasons could be added)" : "");
   });
   return out;
 }
@@ -238,7 +246,7 @@ function welcome() {
 }
 function vHome() {
   if (!S.students.length && !S.lessons.length) return welcome();
-  const ps = periods(), iss = issues(), nIss = issueCount(iss, "bad"), nChk = issueCount(iss, "warn");
+  const ps = periods(), iss = issues(), nIss = issueCount(iss, "bad"), nChk = issueCount(iss, "warn"), nDone = iss.reduce((a, g) => a + g.handled.length, 0);
   const due = ps.filter(p => p.status === "slip" || p.status === "due");
   const next = due[0] || ps[ps.length - 1];
   const after = next ? ps.find(p => p.key > next.key) : null;
@@ -261,9 +269,9 @@ function vHome() {
   }
   const side = `<div class="side">
     ${after ? `<div class="card tight"><span class="eyebrow">After that</span><div class="amt2">${eur(after.logged)}</div><div class="muted small">So far for ${fmtD(after.start)} – ${fmtD(after.end)} (${Math.round(after.weeks)} weeks) · due by ${fmtD(after.due)}</div></div>` : ""}
-    <button class="card status ${nIss ? "bad" : nChk ? "warn" : "good"}" data-act="issues" ${nIss || nChk ? "" : "disabled"}>
+    <button class="card status ${nIss ? "bad" : nChk ? "warn" : "good"}" data-act="issues" ${nIss || nChk || nDone ? "" : "disabled"}>
       <span class="ico">${nIss || nChk ? ICON.alert : ICON.ok}</span>
-      <span class="grow"><b>${nIss ? `${nIss} pay problem${nIss > 1 ? "s" : ""}` : "No pay problems"}</b><br><span class="muted small">${nIss ? "Tap to see what doesn't match" : nChk ? `${nChk} thing${nChk > 1 ? "s" : ""} to check: paid more than you logged` : "Every lesson matches admin's emails"}</span></span>
+      <span class="grow"><b>${nIss ? `${nIss} pay problem${nIss > 1 ? "s" : ""}` : "No pay problems"}</b><br><span class="muted small">${nIss ? "Tap to see what doesn't match" : nChk ? `${nChk} thing${nChk > 1 ? "s" : ""} to check: paid more than you logged` : nDone ? `All clear · ${nDone} handled manually (tap to see)` : "Every lesson matches admin's emails"}</span></span>
     </button></div>`;
   const earned = sum(ps, p => p.logged), paid = sum(ps.filter(p => p.status === "paid"), p => p.slip.gross ?? p.logged);
   const strip = ps.slice(-6).map(p => {
@@ -506,7 +514,7 @@ function vPayslips() {
     <td><b>${x.name}</b>${x.year !== +TODAY.slice(0, 4) ? " " + x.year : ""}<br><span class="muted small">${fmtD(x.start)} – ${fmtD(x.end)} · ${Math.round(x.weeks)} weeks</span></td>
     <td class="r num">${eur(x.logged)}</td><td class="r num b">${x.slip && x.slip.gross != null ? eur(x.slip.gross) : `<span class="muted">—</span>`}</td><td>${pill(c, t)}</td></tr>`; }).join("");
   const wk = S.statements.filter(s => s.week).sort((a, b) => b.week.start.localeCompare(a.week.start));
-  const issByStmt = Object.fromEntries(issues().filter(g => g.stmt).map(g => [g.stmt.id, g.list.filter(i => i.sev !== "warn").length])), chkByStmt = Object.fromEntries(issues().filter(g => g.stmt).map(g => [g.stmt.id, g.list.filter(i => i.sev === "warn").length]));
+  const issByStmt = Object.fromEntries(issues().filter(g => g.stmt).map(g => [g.stmt.id, g.list.filter(i => i.sev !== "warn").length])), chkByStmt = Object.fromEntries(issues().filter(g => g.stmt).map(g => [g.stmt.id, g.list.filter(i => i.sev === "warn").length])), hndByStmt = Object.fromEntries(issues().filter(g => g.stmt).map(g => [g.stmt.id, g.handled.length]));
   return `<div class="row-b"><div><h1>Payslips</h1><div class="muted">Pay periods run Monday to the last Sunday of the month. Money arrives around the 15th of the next month.</div></div><span class="acts">${/^running/.test(STATUS.oldSearch || "") ? `<span class="pill due">Searching your email…</span>` : `<button class="btn ghost" data-act="findold">Find old payslip PDFs</button>`}<button class="btn" data-act="newslip">Add payslip</button></span></div>
   ${searchLine()}
   <section class="split2 top">
@@ -514,7 +522,7 @@ function vPayslips() {
     <aside class="card panel">${p ? slipPanel(p) : `<p class="empty">No pay periods yet.</p>`}</aside>
   </section>
   <section class="card"><h2>Admin's weekly emails</h2>
-    ${wk.length ? wk.map(s => { const n = issByStmt[s.id] || 0; return `<div class="li"><div class="grow"><b>${fmtD(s.week.start)} – ${fmtD(s.week.end)}</b> <span class="muted small">· ${(s.lines || []).length} lines</span></div><span class="num b">${eur(stmtTotal(s))}</span>${s.resolved ? pill("open", "Sorted") : n ? `<button class="pill bad" data-act="issues">${n} pay problem${n > 1 ? "s" : ""}</button>` : chkByStmt[s.id] ? `<button class="pill warn" data-act="issues">${chkByStmt[s.id]} to check</button>` : pill("ok", "Matches")}</div>`; }).join("") : `<p class="empty">None yet. They're picked up from your Gmail every Monday and Tuesday morning.</p>`}
+    ${wk.length ? wk.map(s => { const n = issByStmt[s.id] || 0; return `<div class="li"><div class="grow"><b>${fmtD(s.week.start)} – ${fmtD(s.week.end)}</b> <span class="muted small">· ${(s.lines || []).length} lines</span></div><span class="num b">${eur(stmtTotal(s))}</span>${s.resolved ? pill("open", "Sorted") : n ? `<button class="pill bad" data-act="issues">${n} pay problem${n > 1 ? "s" : ""}</button>` : chkByStmt[s.id] ? `<button class="pill warn" data-act="issues">${chkByStmt[s.id]} to check</button>` : hndByStmt[s.id] ? `<button class="pill" data-act="issues">Handled manually</button>` : pill("ok", "Matches")}</div>`; }).join("") : `<p class="empty">None yet. They're picked up from your Gmail every Monday and Tuesday morning.</p>`}
     <details class="paste"><summary>Paste an email by hand</summary><textarea id="raw" rows="5" placeholder="Paste the whole weekly wages email here"></textarea><div class="acts"><button class="btn" data-act="pastecheck">Add this week</button></div></details>
   </section>`;
 }
@@ -522,8 +530,10 @@ function slipPanel(p) {
   const s = p.slip, refund = s && s.net != null && s.gross != null ? L.round2(s.net - s.gross) : s ? -((+s.paye || 0) + (+s.usc || 0)) : 0;
   const match = !s || s.gross == null ? "" : L.cents(s.gross) === L.cents(p.logged)
     ? `<div class="note good">${ICON.ok}<span>Matches your ${p.lessons.length} lessons${p.stmts.length ? ` and admin's ${p.stmts.length} weekly email${p.stmts.length > 1 ? "s" : ""}` : ""}</span></div>`
-    : p.logged > s.gross ? `<div class="note bad">${ICON.alert}<span>Underpaid: your lessons add up to ${eur(p.logged)}, ${eur(p.logged - s.gross)} more than the payslip</span></div>`
-    : `<div class="note warn">${ICON.alert}<span>Paid ${eur(s.gross - p.logged)} more than your lessons (${eur(p.logged)}). Usually a class or meeting that isn't in your log yet${s.mismatchOk ? ". You've marked it as fine." : `. <button class="link" data-act="slipok" data-pid="${s.id}">It's fine</button>`}</span></div>`;
+    : (() => { const o = ovrOf(`slip-${s.id}#gross`) || (s.mismatchOk ? { reason: "Marked as fine" } : null);
+        if (o) return `<div class="note soft">${ICON.ok}<span><b>Handled manually.</b> Payslip ${eur(s.gross)}, your lessons ${eur(p.logged)}. ${esc(o.reason)}</span></div>`;
+        return p.logged > s.gross ? `<div class="note bad">${ICON.alert}<span>Underpaid: your lessons add up to ${eur(p.logged)}, ${eur(p.logged - s.gross)} more than the payslip. <button class="link" data-act="slipok" data-pid="${s.id}">Handle manually</button></span></div>`
+          : `<div class="note warn">${ICON.alert}<span>Paid ${eur(s.gross - p.logged)} more than your lessons (${eur(p.logged)}). Usually a class or meeting that isn't in your log yet. <button class="link" data-act="slipok" data-pid="${s.id}">Handle manually</button></span></div>`; })();
   const line = (k, v, cls = "") => `<div class="kv ${cls}"><span>${k}</span><span>${v}</span></div>`;
   if (!s) return `<span class="eyebrow">${fmtD(p.start)} – ${fmtD(p.end)}</span><h2>${p.name}</h2>
     ${line("Your lessons", `<b>${eur(p.logged)}</b>`)}${line("Work", `${p.lessons.length} items · ${hrs(p.hours)}`)}${line("Admin's weekly emails", `${p.stmts.length} of ${Math.round(p.weeks)} · ${eur(p.confirmed)}`)}${line(p.status === "open" ? "Paid by" : "Expected by", fmtD(p.due, { day: "numeric", month: "long" }))}
@@ -627,14 +637,25 @@ const dv = id => $("#" + id).value.trim(), dn = id => { const x = dv(id); return
 
 function issuesDlg() {
   const g = issues();
+  const handledLi = i => `<li class="handled">${pill("", "Handled manually")} ${i.date ? `<span class="muted">${fmtD(i.date)}</span> ` : ""}<s>${esc(i.text)}</s>
+    <div class="why">${esc(i.ovr.reason)}${i.ovr.amount != null && i.ovr.amount !== "" ? ` · counts as <b>${eur(+i.ovr.amount)}</b>` : ""}${i.ovr.at ? ` · ${fmtD(i.ovr.at.slice(0, 10), { day: "numeric", month: "short" })}` : ""}
+    <button class="link" data-act="ovrundo" data-k="${esc(i.okey)}">Undo</button></div></li>`;
   openDlg(`<h2>Pay check</h2><p class="muted small">Only things that change what you're paid. <span class="pill bad">Problem</span> means you could be paid less than you should; <span class="pill warn">Paid more</span> is just worth a look (often something not in your log yet).</p>
-    ${g.length ? g.map(x => `<div class="grp"><div class="row-b"><b>${esc(x.title)}</b><span class="acts">${x.stmt ? `${x.list.some(i => i.sev !== "warn") ? `<button class="btn ghost" data-act="draft" data-id="${x.key}">Draft email</button>` : ""}<button class="btn ghost" data-act="sorted" data-id="${x.key}">Mark sorted</button>` : `<button class="btn ghost" data-act="slipok" data-pid="${x.slipId}">It's fine</button>`}</span></div>
-      <ul>${x.list.map(i => `<li>${i.sev === "warn" ? pill("warn", "Paid more") : pill("bad", "Problem")} ${i.date ? `<span class="muted">${fmtD(i.date)}</span> ` : ""}${esc(i.text)}${i.lessonId ? ` <button class="link" data-act="openlesson" data-lid="${i.lessonId}">Open lesson</button>` : ""}${i.line ? ` <button class="link" data-act="fromline" data-g="${esc(x.key)}" data-i="${x.list.indexOf(i)}">Add it to my lessons</button>` : ""}</li>`).join("")}</ul></div>`).join("") : `<p class="empty">Nothing to look at.</p>`}
+    ${g.length ? g.map(x => `<div class="grp"><div class="row-b"><b>${esc(x.title)}</b><span class="acts">${x.stmt && x.list.length ? `<button class="btn ghost" data-act="draft" data-id="${x.key}">Draft email</button>` : ""}</span></div>
+      <ul>${x.list.map(i => `<li>${i.sev === "warn" ? pill("warn", "Paid more") : pill("bad", "Problem")} ${i.date ? `<span class="muted">${fmtD(i.date)}</span> ` : ""}${esc(i.text)}${i.lessonId ? ` <button class="link" data-act="openlesson" data-lid="${i.lessonId}">Open lesson</button>` : ""}${i.line && !i.matched ? ` <button class="link" data-act="fromline" data-g="${esc(x.key)}" data-i="${x.list.indexOf(i)}">Add it to my lessons</button>` : ""} <button class="link" data-act="ovr" data-k="${esc(i.okey)}">Handle manually</button></li>`).join("")}${x.handled.map(handledLi).join("")}</ul></div>`).join("") : `<p class="empty">Nothing to look at.</p>`}
     <div class="acts end"><button class="btn" data-act="close">Close</button></div>`);
+}
+function ovrDlg(okey) {
+  const it = issues().flatMap(g => g.list).find(i => i.okey === okey); if (!it) return issuesDlg();
+  openDlg(`<h2>Handle manually</h2><p class="muted small">${it.date ? fmtD(it.date) + ": " : ""}${esc(it.text)}</p>
+    <label class="fld">Reason<textarea id="o_why" rows="3" placeholder="e.g. Rescheduled to 8 Nov. Admin listed both; told admin on 16 Nov."></textarea></label>
+    ${it.line ? `<label class="fld">This line should count as (€)<input id="o_amt" type="number" step="0.01" min="0" value="${esc(it.line.subtotal)}"></label>
+      <p class="muted small">Admin's line says ${eur(it.line.subtotal)}. Change it if it should count differently, e.g. 0 for a class that shouldn't be paid. This changes "admin agrees" for that pay period, not your own log.</p>` : ""}
+    <div class="acts end"><button class="btn ghost" data-act="issues">Back</button><button class="btn primary" data-act="ovrsave" data-k="${esc(okey)}">Save</button></div>`);
 }
 function draftDlg(id) {
   const g = issues().find(x => x.key === id); if (!g) return;
-  const text = `Hi ${PROFILE.adminName || "there"},\n\nI checked the weekly wages for ${g.title.replace("Week of ", "")} against my records and found:\n\n${g.list.filter(i => i.sev !== "warn").map(i => "- " + (i.date ? fmtD(i.date) + ": " : "") + i.text).join("\n")}\n\nCould you take a look when you get a chance?\n\nThanks,\n${(PROFILE.teacherName || "").split(" ")[0] || ""}`;
+  const text = `Hi ${PROFILE.adminName || "there"},\n\nI checked the weekly wages for ${g.title.replace("Week of ", "")} against my records and found:\n\n${g.list.map(i => "- " + (i.date ? fmtD(i.date) + ": " : "") + i.text).join("\n")}\n\nCould you take a look when you get a chance?\n\nThanks,\n${(PROFILE.teacherName || "").split(" ")[0] || ""}`;
   openDlg(`<h2>Email to admin</h2><p class="muted small">Copy this into your email. Nothing is sent from here.</p><textarea id="dtext" rows="12">${esc(text)}</textarea>
     <div class="acts end"><button class="btn ghost" data-act="issues">Back</button><button class="btn primary" data-act="copy">Copy text</button></div>`);
 }
@@ -708,8 +729,24 @@ document.addEventListener("click", async e => {
   if (a === "issues") return issuesDlg();
   if (a === "draft") return draftDlg(D.id);
   if (a === "copy") { const x = $("#dtext"); try { await navigator.clipboard.writeText(x.value); toast("Copied"); } catch { x.select(); toast("Selected. Press Ctrl+C to copy."); } return; }
-  if (a === "sorted") { const s = S.statements.find(x => x.id === D.id); await save("statements", s.id, { ...strip(s), resolved: true }); return issuesDlg(); }
-  if (a === "slipok") { const s = S.payslips.find(x => x.id === D.pid); await save("payslips", s.id, { ...strip(s), mismatchOk: true }); return issuesDlg(); }
+  if (a === "ovr") return ovrDlg(D.k);
+  if (a === "ovrsave") {
+    const why = ($("#o_why").value || "").trim(); if (!why) { $("#o_why").focus(); return toast("Add a reason, so you know later why it was OK."); }
+    const amt = $("#o_amt") ? $("#o_amt").value.trim() : "";
+    await save("overrides", "ovr-" + uid(), { key: D.k, reason: why, amount: amt === "" ? null : +amt, at: new Date().toISOString() });
+    toast("Handled. It's kept in the list with your reason."); return issuesDlg();
+  }
+  if (a === "ovrundo") { // back to an open flag
+    const o = ovrOf(D.k);
+    if (o) await remove("overrides", o.id);
+    else { // older "Mark sorted" / "It's fine"
+      const [gk] = D.k.split("#"), st = S.statements.find(x => x.id === gk), sl = S.payslips.find(x => "slip-" + x.id === gk);
+      if (st) await save("statements", st.id, { ...strip(st), resolved: false });
+      if (sl) await save("payslips", sl.id, { ...strip(sl), mismatchOk: false });
+    }
+    toast("Flagged again"); return issuesDlg();
+  }
+  if (a === "slipok") return ovrDlg(`slip-${D.pid}#gross`);
   if (a === "claimf") { claimFilter = D.k; return render(); }
   if (a === "period") { selPeriod = D.k; if (view !== "payslips") { view = "payslips"; scrollTo(0, 0); } return render(); }
   if (a === "wk") { weekStart = +D.n === 0 ? L.mondayOf(TODAY) : L.addDays(weekStart, +D.n); sel = null; panelKind = null; return render(); }

@@ -22,6 +22,7 @@ Mistakes slip in: a class left off a weekly email, half an hour paid instead of 
 - **Reads payslip PDFs** straight from your inbox, saves them to Drive, and checks the gross against your classes. It works even when Google's PDF conversion scrambles the columns (it finds gross and net by checking they add up).
 - **Knows the pay calendar.** Pay periods run Monday to the last Sunday of each month (4 or 5 weeks) and money arrives around the 15th of the next month. If a payslip states different dates, those win.
 - **Drafts the email to admin** when something doesn't match. You copy it; nothing is sent for you.
+- **Lets you handle odd cases by hand.** Any flag can be marked *handled manually* with your reason (and, for an email line, the amount it should count as). It stays visible with the reason underneath, and you can undo it.
 - **Keeps your teaching notes** (topic, homework, remarks) with each student's full history beside you while you write.
 - **Keeps your to-dos**, including the ones you've ticked off, so you can look back at what you finished and when.
 - **Builds your payment claim**: every class, its status (paid, payslip in, not yet paid) and which payment it belongs to, ready to copy into Excel or an email.

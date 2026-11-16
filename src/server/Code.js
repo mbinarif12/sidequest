@@ -14,9 +14,10 @@ const TABS = {
   Processed: ["messageId", "date", "subject", "type", "result"],
   Settings: ["key", "value", "about"],
   Todos: ["id", "text", "done", "createdAt", "key", "doneAt"],
+  Overrides: ["id", "key", "reason", "amount", "at"], // pay flags you handled by hand, with your reason
 };
-const COL_TAB = { students: "Students", lessons: "Lessons", statements: "Statements", payslips: "Payslips", todos: "Todos" };
-const NUM = ["weekday", "hours", "rate", "pkgSize", "priorCount", "number", "totalHours", "totalAmount", "gross", "net", "cumulativeGross", "paye", "usc", "ownRate"];
+const COL_TAB = { students: "Students", lessons: "Lessons", statements: "Statements", payslips: "Payslips", todos: "Todos", overrides: "Overrides" };
+const NUM = ["weekday", "hours", "rate", "pkgSize", "priorCount", "number", "totalHours", "totalAmount", "gross", "net", "cumulativeGross", "paye", "usc", "ownRate", "amount"];
 const BOOL = ["active", "followupsDone", "resolved", "needsCheck", "mismatchOk", "done"];
 const JSONF = ["lines"];
 const TZ = "Europe/Dublin";
@@ -131,7 +132,15 @@ function importHistory() {
 }
 
 // ---------- Sheet storage ----------
-function sheet_(name) { const sh = SpreadsheetApp.getActive().getSheetByName(name); if (!sh) throw new Error(`The "${name}" tab is missing. Run SideQuest → Set up / repair.`); return sh; }
+function sheet_(name) {
+  const ss = SpreadsheetApp.getActive(); let sh = ss.getSheetByName(name);
+  if (!sh && name === "Overrides") { // added in a later version: create it the first time it's needed
+    sh = ss.insertSheet(name); sh.getRange(1, 1, 1, TABS[name].length).setValues([TABS[name]]).setFontWeight("bold"); sh.setFrozenRows(1);
+    sh.getRange(1, 1, sh.getMaxRows(), TABS[name].length).setNumberFormat("@");
+  }
+  if (!sh) throw new Error(`The "${name}" tab is missing. Run SideQuest → Set up / repair.`);
+  return sh;
+}
 function headOf_(sh) { return sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String); }
 // Older Sheets get any newer columns added at the end the first time they're needed
 function headWithNew_(sh, name) {
@@ -186,7 +195,7 @@ function setSetting_(k, v) { upsert_("Settings", { key: k, value: v, about: ((DE
 function all_() {
   return {
     students: readRows_("Students"), lessons: readRows_("Lessons"),
-    statements: readRows_("Statements").map(stmtOut_), payslips: readRows_("Payslips").map(p => { const { pdfText, ...r } = p; return { ...r, hasText: !!pdfText }; }),
+    statements: readRows_("Statements").map(stmtOut_), overrides: readRows_("Overrides"), payslips: readRows_("Payslips").map(p => { const { pdfText, ...r } = p; return { ...r, hasText: !!pdfText }; }),
   };
 }
 
