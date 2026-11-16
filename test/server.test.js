@@ -139,6 +139,16 @@ assert.strictEqual(tds.length, 1); T(`300 copies of a repeated to-do are cleaned
   assert.ok(sep); assert.strictEqual(G.api_readSlipPdf("Payslip 12 (30-09-2026).pdf", b64).existingId, sep.id, "same month updates the existing payslip");
   T("uploading a payslip PDF reads it and fills in the form, without adding a second payslip for the same month");
 }
+{ // Manual overrides: an older Sheet has no Overrides tab yet; the first save creates it
+  delete sheets.Overrides;
+  G.api_save("overrides", "ovr-1", { key: "2026-11-02#L:3|2026-11-07|13:30|IE1", reason: "Rescheduled to 8 Nov", amount: 0, at: "2026-11-16T17:00:00Z" });
+  const o = G.readRows_("Overrides")[0]; assert.strictEqual(o.reason, "Rescheduled to 8 Nov"); assert.strictEqual(o.amount, 0);
+  assert.ok(G.api_getAll().overrides.length === 1);
+  T("a flag handled by hand is saved with its reason and amount, even in a Sheet made before overrides existed");
+  const items = G.L.moneyIssues({ week: { start: "2026-11-02", end: "2026-11-08" }, lines: [{ number: 9, date: "2026-11-07", time: "13:30", code: "IE999", label: "Lesson(14)-9 cancelled", hours: 1.5, rate: 35, subtotal: 52.5 }], totalHours: 1.5, totalAmount: 52.5 }, [], []);
+  assert.ok(items.length && items.every(i => i.key), "every flag has a key"); assert.strictEqual(items[0].key, "L:9|2026-11-07|13:30|IE999");
+  T("every pay flag has a stable key, so an override stays attached to it");
+}
 const P = G.L.buildPeriods("2026-09-01", "2026-11-20", [{ periodStart: "2026-08-31", periodEnd: "2026-09-27" }, { periodStart: "2026-09-28", periodEnd: "2026-11-01" }]);
 assert.strictEqual(P.find(p => p.name === "October").weeks, 5); assert.strictEqual(P.find(p => p.name === "November").start, "2026-11-02"); T("pay periods: a 5-week payslip moves the boundary, the rest follow");
 assert.strictEqual(G.L.periodFor("2026-10-31").name, "November"); T("pay periods: a week counts in the month its Sunday falls in");

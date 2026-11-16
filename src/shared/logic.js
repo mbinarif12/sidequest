@@ -230,19 +230,21 @@ const L = (() => {
   const nextPeriod = p => p.key.endsWith("-12") ? periodOfMonth(p.year + 1, 0) : periodOfMonth(p.year, +p.key.slice(5) );
 
   // Problems that change what you're paid. Email cosmetics and lesson counters are left out on purpose.
+  // Identifies a weekly-email line, so a manual override stays attached to it
+  const lineKey = l => `${l.number || ""}|${l.date || ""}|${l.time || ""}|${l.code || ""}`;
   function moneyIssues(p, students, lessons) {
     const out = [], ic = internalChecks(p), m = matchStatement(p, students, lessons);
-    ic.issues.filter(i => i.sev === "bad").forEach(i => out.push({ sev: "bad", text: i.text }));
+    ic.issues.filter(i => i.sev === "bad").forEach(i => out.push({ sev: "bad", key: "C:" + i.text, text: i.text }));
     m.rows.forEach(r => {
       const who = (r.student && r.student.name) || r.line.label.replace(/Lesson\(\d+\)-\d+\s*/, "").replace(/\b(IE\d+|T\d+)\b/, "").trim().slice(0, 40);
-      if (r.status === "extra") out.push({ sev: "warn", date: r.line.date, text: `Admin paid ${who} (€${r.line.subtotal.toFixed(2)}, ${r.line.hours} h × €${r.line.rate}${r.line.code ? ", code " + r.line.code : ""}) but it isn't in your lessons`, amount: r.line.subtotal, line: r.line, studentId: r.student ? r.student.id : "" });
-      r.diffs.filter(d => d.sev === "bad").forEach(d => out.push({ sev: "bad", date: r.line.date, text: `${who}: ${d.text}` }));
+      if (r.status === "extra") out.push({ sev: "warn", key: "L:" + lineKey(r.line), date: r.line.date, text: `Admin paid ${who} (€${r.line.subtotal.toFixed(2)}, ${r.line.hours} h × €${r.line.rate}${r.line.code ? ", code " + r.line.code : ""}) but it isn't in your lessons`, amount: r.line.subtotal, line: r.line, studentId: r.student ? r.student.id : "" });
+      r.diffs.filter(d => d.sev === "bad").forEach(d => out.push({ sev: "bad", key: "L:" + lineKey(r.line), date: r.line.date, line: r.line, matched: true, text: `${who}: ${d.text}` }));
     });
     const nm = l => ((students.find(s => s.id === l.studentId) || {}).name) || l.label || "A lesson";
-    m.missing.forEach(l => out.push({ sev: "bad", date: l.date, lessonId: l.id, text: `${nm(l)} isn't on admin's list (€${amountOf(l).toFixed(2)})`, amount: -amountOf(l) }));
+    m.missing.forEach(l => out.push({ sev: "bad", key: "M:" + l.id, date: l.date, lessonId: l.id, text: `${nm(l)} isn't on admin's list (€${amountOf(l).toFixed(2)})`, amount: -amountOf(l) }));
     return out;
   }
 
-  return { iso, parseISO, addDays, weekday, mondayOf, dmyToISO, round2, cents, amountOf, fifteenthAfter, parseWeekly, internalChecks, matchStatement, parsePayslip, parsePeriod, periodFor, periodOfMonth, nextPeriod, buildPeriods, periodName, moneyIssues, PAID_KINDS, MONTHS };
+  return { iso, parseISO, addDays, weekday, mondayOf, dmyToISO, round2, cents, amountOf, fifteenthAfter, parseWeekly, internalChecks, matchStatement, parsePayslip, parsePeriod, periodFor, periodOfMonth, nextPeriod, buildPeriods, periodName, moneyIssues, lineKey, PAID_KINDS, MONTHS };
 })();
 if (typeof module !== "undefined") module.exports = L;
