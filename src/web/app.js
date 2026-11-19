@@ -484,7 +484,7 @@ function collectPanel() {
   if (panelKind) d.kind = panelKind;
   if (m._other || $("#p_kind")) { d.kind = v("p_kind"); d.label = v("p_label") || KINDS[d.kind]; d.date = v("p_date") || d.date; d.studentId = ""; }
   if (!d.kind) d.kind = "class";
-  if (d.kind === "cancelled") d.number = null;
+  if (d.kind === "cancelled" || d.kind === "noshow") d.number = null; // only taught classes use up a lesson from the package
   const set = (k, x) => { if (x !== undefined) d[k] = x; };
   set("hours", n("p_hours")); set("rate", n("p_rate")); set("number", n("p_num"));
   set("topic", v("p_topic")); set("homework", v("p_hw")); set("notes", v("p_notes")); set("followups", v("p_fu"));
