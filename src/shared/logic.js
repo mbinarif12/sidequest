@@ -95,8 +95,12 @@ const L = (() => {
     const rows = p.lines.map(line => {
       const cands = candidatesFor(line);
       let lesson = null, st = cands[0] || null;
+      // Several things with one student on one day (a class and a parent meeting, or two classes): take the best fit,
+      // scored by same length, same start time, same rate
+      const fit = l => (cents(l.hours) === cents(line.hours) ? 4 : 0) + (line.time && l.time === line.time ? 2 : 0) + (cents(l.rate) === cents(line.rate) ? 1 : 0);
       for (const c of cands) {
-        lesson = inWeek.find(l => !used.has(l.id) && l.studentId === c.id && l.date === line.date);
+        const opts = inWeek.filter(l => !used.has(l.id) && l.studentId === c.id && l.date === line.date).sort((a, b) => fit(b) - fit(a));
+        lesson = opts[0] || null;
         if (lesson) { st = c; break; }
       }
       if (!lesson) // one-offs (trials, demos, meetings) logged without a student: same date and hours
@@ -237,7 +241,9 @@ const L = (() => {
     ic.issues.filter(i => i.sev === "bad").forEach(i => out.push({ sev: "bad", key: "C:" + i.text, text: i.text }));
     m.rows.forEach(r => {
       const who = (r.student && r.student.name) || r.line.label.replace(/Lesson\(\d+\)-\d+\s*/, "").replace(/\b(IE\d+|T\d+)\b/, "").trim().slice(0, 40);
-      if (r.status === "extra") out.push({ sev: "warn", key: "L:" + lineKey(r.line), date: r.line.date, text: `Admin paid ${who} (€${r.line.subtotal.toFixed(2)}, ${r.line.hours} h × €${r.line.rate}${r.line.code ? ", code " + r.line.code : ""}) but it isn't in your lessons`, amount: r.line.subtotal, line: r.line, studentId: r.student ? r.student.id : "" });
+      if (r.status === "extra") out.push({ sev: "warn", key: "L:" + lineKey(r.line), date: r.line.date, text: /cancel/i.test(r.line.label)
+        ? `Admin marked ${who}'s ${r.line.time || ""} class "${r.line.label}" as cancelled but still paid it (€${r.line.subtotal.toFixed(2)}, ${r.line.hours} h). If it was rescheduled, it shouldn't be paid twice.`
+        : `Admin paid ${who} (€${r.line.subtotal.toFixed(2)}, ${r.line.hours} h × €${r.line.rate}${r.line.code ? ", code " + r.line.code : ""}) but it isn't in your lessons`, amount: r.line.subtotal, line: r.line, studentId: r.student ? r.student.id : "" });
       r.diffs.filter(d => d.sev === "bad").forEach(d => out.push({ sev: "bad", key: "L:" + lineKey(r.line), date: r.line.date, line: r.line, matched: true, text: `${who}: ${d.text}` }));
     });
     const nm = l => ((students.find(s => s.id === l.studentId) || {}).name) || l.label || "A lesson";

@@ -17,6 +17,9 @@ Mistakes slip in: a class left off a weekly email, half an hour paid instead of 
 ## What it does for you
 
 - **Logs your classes from Google Calendar.** Any event whose title has a student's name or course code becomes a class. Once it has ended, it's logged automatically: no typing.
+- **Lets you plan from SideQuest.** *+ Add to calendar* puts a class, trial, meeting or reports session straight into your Google Calendar, so your calendar stays the one place things are planned.
+- **Asks when it isn't sure.** An event it can't place but that looks like a class (a course code like *IE901*, a grade like *G11*) is highlighted; click it to say it's a new student, an existing one, a trial, a meeting or not teaching. It remembers, for that event and its repeats.
+- **Follows your calendar changes.** Move or delete a class and the log follows; anything you've written notes for is never deleted without asking.
 - **Knows trials and meetings too.** Events with *trial*, *demo*, *meeting*, *parent* or *report* in the title are planned and logged as that kind of work (at the right rate), never as a package class. A trial that goes well becomes a new student in one click.
 - **Reads the weekly wages email** every Monday and Tuesday morning and matches each line to a class you taught. Only things that change your pay are flagged (wrong hours, wrong rate, a class left off), not cosmetic glitches in the email.
 - **Reads payslip PDFs** straight from your inbox, saves them to Drive, and checks the gross against your classes. It works even when Google's PDF conversion scrambles the columns (it finds gross and net by checking they add up).
@@ -91,7 +94,9 @@ Older payslip PDFs are found with **Payslips → Find old payslip PDFs**, which 
 
 ```bash
 npm run build         # src/ → dist/ (for clasp) and release/ (the 3 files in each GitHub Release)
-npm test              # runs the Apps Script code in Node against fake Google services (both dist/ and the single Code.gs)
+npm test              # Apps Script code against fake Google services, calendar scenarios (move, delete, rename…) and pay scenarios
+node test/ui-flows.js # browser walk-through of the main flows (needs Playwright)
+node test/ui-crawl.js # clicks every button on every page, laptop + phone, light + dark (needs Playwright)
 npm run screenshots   # regenerates docs/screenshots with invented demo data (needs Playwright)
 ```
 

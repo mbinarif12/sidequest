@@ -130,6 +130,8 @@ Your bookmark keeps working. If the new version mentions new tabs or settings, r
 | **A blank page or "SideQuest hit an error"** | Index.html wasn't pasted in full, or was named something other than *Index*. Paste it again, save, then **Deploy → Manage deployments → Edit → New version → Deploy**. |
 | **"You need access" / "Sorry, unable to open the file"** | You're signed into a different Google account in that browser. Open the link in the account you installed with. |
 | **"The Students tab is missing"** | Run **setup** again (Step 5). |
+| **"SideQuest isn't allowed to add to your calendar"** | Since SideQuest can add events for you, Google may ask once more for permission. Reload SideQuest and click **Allow** (or run **setup** once in Apps Script). |
+| **A class shows with a dashed amber outline and "Not linked"** | SideQuest thinks it's a class but doesn't know the student. Click it and choose who it's for (or *New student*). |
 | **No classes appear** | Check the class events' titles contain the student's name (as written in Students) or their course code, then press **Sync calendar**. |
 | **Wages emails aren't picked up** | Check the sender's address in **Profile** matches the one on the emails exactly, then press **Check email**. |
 

@@ -15,7 +15,10 @@ jobs:
           node-version: 20
       - run: node scripts/build.mjs
       - run: node test/server.test.js
+      - run: node test/calendar.test.js
+      - run: node test/money.test.js
       - run: SQ_RELEASE=1 node test/server.test.js
+      - run: SQ_RELEASE=1 node test/calendar.test.js
   deploy:
     needs: test
     if: github.ref == 'refs/heads/main'

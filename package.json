@@ -6,8 +6,9 @@
   "license": "MIT",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node scripts/build.mjs && node test/server.test.js && SQ_RELEASE=1 node test/server.test.js",
+    "test": "node scripts/build.mjs && node test/server.test.js && node test/calendar.test.js && node test/money.test.js && SQ_RELEASE=1 node test/server.test.js && SQ_RELEASE=1 node test/calendar.test.js",
     "screenshots": "node scripts/build.mjs && node scripts/screenshots.js",
-    "push": "node scripts/build.mjs && npx -y @google/clasp@2.4.2 push --force"
+    "push": "node scripts/build.mjs && npx -y @google/clasp@2.4.2 push --force",
+    "test:ui": "node scripts/build.mjs && node test/ui-flows.js && node test/ui-crawl.js"
   }
 }

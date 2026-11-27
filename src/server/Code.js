@@ -15,8 +15,9 @@ const TABS = {
   Settings: ["key", "value", "about"],
   Todos: ["id", "text", "done", "createdAt", "key", "doneAt"],
   Overrides: ["id", "key", "reason", "amount", "at"], // pay flags you handled by hand, with your reason
+  EventTags: ["id", "series", "title", "tag", "studentId", "at"], // what a calendar event is, when you told SideQuest yourself
 };
-const COL_TAB = { students: "Students", lessons: "Lessons", statements: "Statements", payslips: "Payslips", todos: "Todos", overrides: "Overrides" };
+const COL_TAB = { students: "Students", lessons: "Lessons", statements: "Statements", payslips: "Payslips", todos: "Todos", overrides: "Overrides", eventtags: "EventTags" };
 const NUM = ["weekday", "hours", "rate", "pkgSize", "priorCount", "number", "totalHours", "totalAmount", "gross", "net", "cumulativeGross", "paye", "usc", "ownRate", "amount"];
 const BOOL = ["active", "followupsDone", "resolved", "needsCheck", "mismatchOk", "done"];
 const JSONF = ["lines"];
@@ -134,7 +135,7 @@ function importHistory() {
 // ---------- Sheet storage ----------
 function sheet_(name) {
   const ss = SpreadsheetApp.getActive(); let sh = ss.getSheetByName(name);
-  if (!sh && name === "Overrides") { // added in a later version: create it the first time it's needed
+  if (!sh && (name === "Overrides" || name === "EventTags")) { // added in a later version: create it the first time it's needed
     sh = ss.insertSheet(name); sh.getRange(1, 1, 1, TABS[name].length).setValues([TABS[name]]).setFontWeight("bold"); sh.setFrozenRows(1);
     sh.getRange(1, 1, sh.getMaxRows(), TABS[name].length).setNumberFormat("@");
   }
@@ -195,7 +196,7 @@ function setSetting_(k, v) { upsert_("Settings", { key: k, value: v, about: ((DE
 function all_() {
   return {
     students: readRows_("Students"), lessons: readRows_("Lessons"),
-    statements: readRows_("Statements").map(stmtOut_), overrides: readRows_("Overrides"), payslips: readRows_("Payslips").map(p => { const { pdfText, ...r } = p; return { ...r, hasText: !!pdfText }; }),
+    statements: readRows_("Statements").map(stmtOut_), overrides: readRows_("Overrides"), eventtags: readRows_("EventTags"), payslips: readRows_("Payslips").map(p => { const { pdfText, ...r } = p; return { ...r, hasText: !!pdfText }; }),
   };
 }
 
@@ -255,18 +256,56 @@ function api_week(mondayISO) {
   const id = String(getSettings_().calendarId || "primary").trim();
   let cal; try { cal = id === "primary" || !id ? CalendarApp.getDefaultCalendar() : CalendarApp.getCalendarById(id); } catch (e) { return { error: "no-calendar", events: [] }; }
   if (!cal) return { error: "no-calendar", events: [] };
-  const students = readRows_("Students");
+  const students = readRows_("Students"), tags = readRows_("EventTags");
   const a = new Date(mondayISO + "T00:00:00"), b = new Date(a.getTime() + 7 * 864e5 + 3 * 36e5);
   const events = cal.getEvents(new Date(a.getTime() - 3 * 36e5), b).map(ev => {
-    const s = ev.isAllDayEvent() ? null : matchStudent_(ev.getTitle(), students);
+    const cls = ev.isAllDayEvent() ? { s: null, kind: "" } : classify_(ev, students, tags), s = cls.s;
     const date = Utilities.formatDate(ev.getStartTime(), TZ, "yyyy-MM-dd");
     return { key: ev.getId() + "@" + date, title: ev.getTitle(), allDay: ev.isAllDayEvent(), date,
       start: Utilities.formatDate(ev.getStartTime(), TZ, "HH:mm"), end: Utilities.formatDate(ev.getEndTime(), TZ, "HH:mm"),
       endDate: Utilities.formatDate(ev.getEndTime(), TZ, "yyyy-MM-dd"), startIso: ev.getStartTime().toISOString(), studentId: s ? s.id : "",
-      kind: ev.isAllDayEvent() ? "" : workKind_(ev.getTitle()) };
+      kind: cls.kind || "", series: ev.getId(), ignored: !!cls.ignore, tagged: !!cls.tagged,
+      looksLikeClass: !ev.isAllDayEvent() && !s && !cls.kind && !cls.ignore && looksLikeClass_(ev.getTitle()) };
   });
   return { error: "", events };
 }
+// Tell SideQuest what an event is: tag = "student" (with studentId) | "demo" | "meeting" | "reports" | "ignore" | "" (forget)
+function api_tagEvent(t) {
+  withLock_(() => {
+    const old = readRows_("EventTags").filter(x => x.series === t.series || (t.title && String(x.title).trim().toLowerCase() === String(t.title).trim().toLowerCase()));
+    old.forEach(x => delete_("EventTags", x.id));
+    if (t.tag) upsert_("EventTags", { id: "tag-" + Utilities.getUuid().slice(0, 8), series: t.series || "", title: t.title || "", tag: t.tag, studentId: t.studentId || "", at: new Date().toISOString() });
+  });
+  return api_getAll();
+}
+// Add a class, trial, meeting or reports session to your Google Calendar (the calendar stays the one place things are planned)
+function api_addEvent(x) {
+  const id = String(getSettings_().calendarId || "primary").trim();
+  const cal = id === "primary" || !id ? CalendarApp.getDefaultCalendar() : CalendarApp.getCalendarById(id);
+  if (!cal) throw new Error("Couldn't find your calendar. Check the calendar setting on your Profile page.");
+  const students = readRows_("Students"), s = x.studentId ? students.find(t => t.id === x.studentId) : null;
+  if (x.type === "class" && !s) throw new Error("Pick the student for this class.");
+  const m = String(x.date || "").match(/^(\d{4})-(\d{2})-(\d{2})$/), hm = String(x.time || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!m || !hm) throw new Error("Pick a date and a start time.");
+  const mins = Math.max(5, Math.min(600, +x.minutes || 60));
+  const start = new Date(+m[1], +m[2] - 1, +m[3], +hm[1], +hm[2]), end = new Date(start.getTime() + mins * 6e4);
+  let title = String(x.title || "").trim();
+  if (!title) {
+    const who = s ? s.name : String(x.name || "").trim(), subj = String(x.subject || (s && s.subject) || "").trim();
+    title = x.type === "class" ? [s.code, s.name, subj].filter(Boolean).join(" - ")
+      : x.type === "demo" ? [subj, "Trial class", who].filter(Boolean).join(" – ")
+      : x.type === "meeting" ? ["Parent meeting", who].filter(Boolean).join(" – ")
+      : ["Write reports", who].filter(Boolean).join(" – ");
+  }
+  let ev;
+  try { ev = cal.createEvent(title, start, end); }
+  catch (e) { throw new Error("SideQuest isn't allowed to add to your calendar yet. Reload SideQuest and allow access when Google asks (" + e.message + ")"); }
+  // Remember what it is, so it's recognised even if the title doesn't say
+  withLock_(() => upsert_("EventTags", { id: "tag-" + Utilities.getUuid().slice(0, 8), series: ev.getId(), title: "", tag: x.type === "class" ? "student" : x.type,
+    studentId: s ? s.id : "", at: new Date().toISOString() }));
+  return api_getAll();
+}
+
 // Read a payslip PDF again (e.g. one the old reader couldn't make sense of)
 function api_rereadSlip(id) { withLock_(() => rereadSlip_(readRows_("Payslips").find(p => p.id === id))); return api_getAll(); }
 
@@ -288,10 +327,14 @@ function matchStudent_(title, students) {
   const byCode = act.find(s => s.code && new RegExp("\\b" + String(s.code).toLowerCase() + "\\b").test(t));
   if (byCode) return byCode;
   // 2) every word of the student's calendar keyword (name, plus subject when a student has two classes); most words wins
-  let best = null, bestN = 0;
+  //    On a tie (e.g. one student with a Maths and an Applied Maths class), the subject that fits the title best wins
+  let best = null, bestN = 0, bestSub = -1;
   act.forEach(s => {
     const words = String(s.calKeyword || s.name || "").toLowerCase().split(/\s+/).filter(Boolean);
-    if (words.length && words.every(w => t.indexOf(w) >= 0) && words.length > bestN) { best = s; bestN = words.length; }
+    if (!words.length || !words.every(w => t.indexOf(w) >= 0)) return;
+    const subj = String(s.subject || "").toLowerCase().replace(/\(h\)|\(o\)/g, "").split(/\s+/).filter(Boolean);
+    const sub = subj.filter(w => t.indexOf(w.replace(/s$/, "")) >= 0).length - subj.filter(w => t.indexOf(w.replace(/s$/, "")) < 0).length;
+    if (words.length > bestN || (words.length === bestN && sub > bestSub)) { best = s; bestN = words.length; bestSub = sub; }
   });
   return best;
 }
@@ -307,8 +350,28 @@ function workKind_(title) {
   return "";
 }
 
+// What you told SideQuest an event is (by event, which covers a repeating series, or by its exact title)
+function tagFor_(ev, tags) {
+  const id = ev.getId(), t = String(ev.getTitle() || "").trim().toLowerCase();
+  return tags.find(x => x.series === id) || tags.find(x => x.title && String(x.title).trim().toLowerCase() === t) || null;
+}
+// → { s: student or null, kind: "" (a class) | "demo" | "meeting" | "reports", ignore: true for "not teaching" }
+function classify_(ev, students, tags) {
+  const title = ev.getTitle(), tag = tagFor_(ev, tags);
+  if (tag && tag.tag === "ignore") return { s: null, kind: "", ignore: true, tagged: true };
+  if (tag && tag.tag === "student") return { s: students.find(x => x.id === tag.studentId) || null, kind: workKind_(title), tagged: true };
+  if (tag && ["demo", "meeting", "reports"].indexOf(tag.tag) >= 0)
+    return { s: (tag.studentId && students.find(x => x.id === tag.studentId)) || matchStudent_(title, students), kind: tag.tag, tagged: true };
+  return { s: matchStudent_(title, students), kind: workKind_(title) };
+}
+// An event SideQuest can't place, but whose title looks like teaching: a course code (IE901, T9912), a grade (G11) or "class"/"lesson"
+function looksLikeClass_(title) {
+  const t = String(title || "");
+  return /\b[A-Za-z]{1,3}\d{3,6}\b/.test(t) || /\bG(1[0-2]|[1-9])\b/i.test(t) || /\b(class|lesson|tuition|grinds?)\b/i.test(t);
+}
+
 function syncCalendar_() {
-  const out = { created: 0, updated: 0, planned: [], unmatched: [], orphans: [], error: "" };
+  const out = { created: 0, updated: 0, removed: 0, planned: [], unmatched: [], unknown: [], orphans: [], error: "" };
   let cal;
   try {
     const id = String(getSettings_().calendarId || "primary").trim();
@@ -320,22 +383,40 @@ function syncCalendar_() {
   const from = st.calendarFrom || today_();
   const start = new Date(Date.UTC(+from.slice(0, 4), +from.slice(5, 7) - 1, +from.slice(8, 10)) - 864e5);
   const end = new Date(now.getTime() + 60 * 864e5);
-  const students = readRows_("Students"), lessons = readRows_("Lessons");
+  const students = readRows_("Students"), lessons = readRows_("Lessons"), tags = readRows_("EventTags");
   const seenTitle = {}, liveKeys = {};
   let events;
   try { events = cal.getEvents(start, end); } catch (e) { out.error = "Couldn't read your calendar: " + e.message; return out; }
+  // Classes logged from the calendar whose event has since been deleted or moved (to another time or day).
+  // Ones SideQuest logged by itself and you never touched simply go (before anything new is logged, so lesson numbers stay right):
+  // the moved event is logged again in its new place. Ones you wrote notes for stay, and you're asked what happened.
+  events.forEach(ev => { if (!ev.isAllDayEvent()) { const d = Utilities.formatDate(ev.getStartTime(), TZ, "yyyy-MM-dd"); liveKeys[ev.getId() + "@" + d] = 1; liveKeys[ev.getId() + "|" + d] = 1; } });
+  const inWin = l => l.date >= from && new Date(l.date + "T00:00:00Z") >= start && new Date(l.date + "T00:00:00Z") < end;
+  const isLive = l => liveKeys[l.eventId] || liveKeys[l.eventId + "|" + l.date]; // older links were just the event id
+  const gone = lessons.filter(l => l.eventId && l.eventId !== "kept" && inWin(l) && !isLive(l) && l.kind !== "cancelled");
+  const untouched = l => l.source === "calendar" && !l.topic && !l.notes && !l.homework && !l.followups && l.kind !== "noshow";
+  // Safety: if lots vanish at once (e.g. you switched calendars), don't delete anything, just ask
+  const auto = gone.filter(untouched), safe = auto.length <= 5 && auto.length <= Math.max(2, lessons.length * 0.2);
+  if (safe) auto.forEach(l => { delete_("Lessons", l.id); lessons.splice(lessons.indexOf(l), 1); out.removed++; });
+  out.orphans = gone.filter(l => !(safe && untouched(l))).map(l => l.id);
   events.forEach(ev => {
     if (ev.isAllDayEvent()) return;
-    const title = ev.getTitle(), s = matchStudent_(title, students), kind = workKind_(title);
+    const title = ev.getTitle(), cls = classify_(ev, students, tags), s = cls.s, kind = cls.kind;
     const date = Utilities.formatDate(ev.getStartTime(), TZ, "yyyy-MM-dd");
+    if (cls.ignore) return;
     if (kind) return workEvent_(ev, kind, title, s, date, { out, lessons, liveKeys, now, from, autoLog });
-    if (!s) { if (!seenTitle[title]) { seenTitle[title] = 1; out.unmatched.push(title); } return; }
+    if (!s) {
+      if (!seenTitle[title]) { seenTitle[title] = 1; out.unmatched.push(title); }
+      if (looksLikeClass_(title) && ev.getStartTime() < new Date(now.getTime() + 21 * 864e5) && date >= from)
+        out.unknown.push({ series: ev.getId(), title, date, time: Utilities.formatDate(ev.getStartTime(), TZ, "HH:mm") });
+      return;
+    }
     // One key per event per day: a recurring series shares an id, and moving a class to another day makes it a new class.
     const key = ev.getId() + "@" + date;
     liveKeys[key] = 1;
     const time = Utilities.formatDate(ev.getStartTime(), TZ, "HH:mm");
     const hours = Math.round((ev.getEndTime() - ev.getStartTime()) / 9e5) / 4 || s.hours || 1;
-    const sameEvent = l => l.eventId === key || (l.eventId && l.eventId.indexOf(ev.getId() + "@") === 0 && l.date === date);
+    const sameEvent = l => l.eventId === key || (l.eventId && l.eventId.indexOf(ev.getId() + "@") === 0 && l.date === date) || (l.eventId === ev.getId() && l.date === date);
     const linked = lessons.find(sameEvent) || lessons.find(l => !l.eventId && l.studentId === s.id && l.date === date && l.kind !== "cancelled");
     if (ev.getStartTime() > now) {
       out.planned.push({ eventId: key, studentId: s.id, date, time, hours, start: ev.getStartTime().toISOString(), title, lessonId: linked ? linked.id : "" });
@@ -347,6 +428,10 @@ function syncCalendar_() {
       if (upd.eventId !== key) upd.eventId = key;
       // Class moved earlier or later the same day: follow the calendar unless you've already written it up
       if (upd.source === "calendar" && !upd.topic && !upd.notes && (upd.time !== time || (upd.kind === "class" && upd.hours !== hours))) { upd.time = time; if (upd.kind === "class") upd.hours = hours; out.updated++; }
+      // Event renamed to another student before you wrote it up: it becomes their class
+      if (upd.source === "calendar" && !upd.topic && !upd.notes && upd.kind === "class" && upd.studentId !== s.id) {
+        upd.studentId = s.id; upd.rate = rateFor_("class", date, s); upd.number = nextNumber_(s, lessons.filter(x => x.id !== upd.id)); out.updated++;
+      }
       if (JSON.stringify(upd) !== JSON.stringify(linked)) { upsert_("Lessons", upd); Object.assign(linked, upd); }
       return;
     }
@@ -359,8 +444,6 @@ function syncCalendar_() {
     };
     upsert_("Lessons", l); lessons.push(l); out.created++;
   });
-  // Classes logged from the calendar whose event has since been deleted or moved to another day
-  out.orphans = lessons.filter(l => l.eventId && l.eventId !== "kept" && l.date >= from && new Date(l.date + "T00:00:00Z") >= start && new Date(l.date + "T00:00:00Z") < end && !liveKeys[l.eventId] && l.kind !== "cancelled").map(l => l.id);
   out.planned.sort((a, b) => a.start.localeCompare(b.start));
   return out;
 }
@@ -372,6 +455,9 @@ function workEvent_(ev, kind, title, s, date, c) {
   const hours = Math.round((ev.getEndTime() - ev.getStartTime()) / 9e5) / 4 || 1;
   const linked = c.lessons.find(l => l.eventId === key || (l.eventId && l.eventId.indexOf(ev.getId() + "@") === 0 && l.date === date));
   const plan = extra => c.out.planned.push({ eventId: key, studentId: s ? s.id : "", kind, label: title, date, time, hours, start: ev.getStartTime().toISOString(), title, lessonId: "", ...extra });
+  if (linked && linked.source === "calendar" && !linked.topic && !linked.notes && linked.kind !== "class" && (linked.time !== time || linked.hours !== hours) && ev.getStartTime() <= c.now) {
+    const upd = { ...linked, time, hours }; upsert_("Lessons", upd); Object.assign(linked, upd); c.out.updated++;
+  }
   if (linked) {
     // Logged as a class before SideQuest knew these words (e.g. a parent meeting with the student's name): fix it, unless you've written it up
     if (linked.kind === "class" && linked.source === "calendar" && !linked.topic && !linked.notes) {
