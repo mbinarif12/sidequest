@@ -92,6 +92,8 @@ Older payslip PDFs are found with **Payslips → Find old payslip PDFs**, which 
 
 ## Development
 
+**How the code works** (architecture, data model, every flow, function reference, tests): [docs/TECHNICAL.md](docs/TECHNICAL.md).
+
 ```bash
 npm run build         # src/ → dist/ (for clasp) and release/ (the 3 files in each GitHub Release)
 npm test              # Apps Script code against fake Google services, calendar scenarios (move, delete, rename…) and pay scenarios
