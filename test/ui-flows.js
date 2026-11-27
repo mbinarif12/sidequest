@@ -81,6 +81,13 @@ const T = s => console.log("✓ " + s);
     T("a written-up class whose event you deleted shows as \"Not in your calendar now\" and asks Keep or Delete");
     await pg.close();
 
+    // Deleting a class that came from the calendar: remembered, so it doesn't come back
+    pg = await open("Calendar"); await pg.locator(".ev.cw", { hasText: "Paren" }).first().click(); await pg.waitForSelector("dialog[open]");
+    await pg.click("dialog[open] [data-act=dellesson]"); await pg.waitForTimeout(80); await pg.click("dialog[open] [data-act=dellesson]"); await pg.waitForTimeout(300);
+    const dl = await calls(pg, "api_deleteLesson"); assert.strictEqual(dl.length, 1); assert.match(await toastText(pg), /won't come back/);
+    T("deleting a class that came from the calendar asks to confirm, then is remembered so the next sync doesn't bring it back");
+    await pg.close();
+
     // Skipping a future class still works
     pg = await open("Calendar"); await pg.click("[data-act=wk][data-n='7']"); await pg.waitForTimeout(250);
     const fut = pg.locator(".ev.plan", { hasText: "Darragh" }); await fut.first().click(); await pg.waitForSelector("dialog[open]");

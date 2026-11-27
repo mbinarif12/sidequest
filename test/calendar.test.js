@@ -34,7 +34,7 @@ function env(startAt) {
   }
   const sheets = {}, cal = [];
   let nextId = 1;
-  const wrap = e => ({ getId: () => e.id, getTitle: () => e.title, getStartTime: () => new Date(e.s), getEndTime: () => new Date(e.e), isAllDayEvent: () => !!e.allDay });
+  const wrap = e => ({ getId: () => e.id, getTitle: () => e.title, getStartTime: () => new Date(e.s), getEndTime: () => new Date(e.e), isAllDayEvent: () => !!e.allDay, getMyStatus: () => e.status || "OWNER" });
   const ctx = {
     console, Date: FakeDate,
     SpreadsheetApp: { getActive: () => ({ getSheetByName: n => sheets[n] || null, insertSheet: n => (sheets[n] = makeSheet()), getSheets: () => Object.values(sheets), deleteSheet() {} }), getUi: () => ({}) },
@@ -44,7 +44,7 @@ function env(startAt) {
         getEvents: (a, b) => cal.filter(e => !e.deleted && new Date(e.s) < b && new Date(e.e) > a).map(wrap),
         createEvent: (title, s, e) => { const ev = { id: "new" + nextId++, title, s: s.toISOString(), e: e.toISOString() }; cal.push(ev); return wrap(ev); },
       }),
-      getCalendarById: () => null,
+      getCalendarById: () => null, GuestStatus: { NO: "NO", YES: "YES", OWNER: "OWNER", INVITED: "INVITED" },
     },
     MailApp: { sendEmail() {} }, Session: { getEffectiveUser: () => ({ getEmail: () => "alex@example.com" }) },
     LockService: { getScriptLock: () => ({ waitLock() {}, tryLock: () => true, releaseLock() {} }) },
@@ -53,7 +53,7 @@ function env(startAt) {
     DriveApp: {}, Drive: {}, DocumentApp: {}, MimeType: {},
   };
   vm.createContext(ctx);
-  vm.runInContext(CODE + "\nthis.__ = { setup, api_getAll, api_save, api_remove, api_week, api_tagEvent, api_addEvent, setSetting_, readRows_ };", ctx);
+  vm.runInContext(CODE + "\nthis.__ = { setup, api_getAll, api_save, api_remove, api_week, api_tagEvent, api_addEvent, api_deleteLesson, setSetting_, readRows_ };", ctx);
   const G = ctx.__;
   G.setup();
   G.setSetting_("calendarFrom", startAt.slice(0, 10));
@@ -267,5 +267,58 @@ function env(startAt) {
   const d = t.to("2026-11-24 19:30").sync();
   assert.strictEqual(t.lessons().length, 1); assert.strictEqual(t.lessons()[0].id, "legacy"); assert.strictEqual(d.calendar.orphans.length, 0);
   T("a lesson saved by an older version (link without a date) is matched, not duplicated or deleted");
+}
+{ // Classes sent as invitations: deleting one in Google Calendar only marks it "declined"
+  const t = env("2026-11-23 09:00"); t.student("rory", "Rory");
+  const inv = t.event("inv18", "Rory - G12 Maths", "2026-11-24 18:00", 60); inv.status = "YES";
+  t.to("2026-11-24 19:05").sync(); assert.strictEqual(t.lessons().length, 1);
+  inv.status = "NO"; t.event("inv19", "Rory - G12 Maths", "2026-11-24 19:00", 60);
+  t.to("2026-11-24 20:05").sync();
+  const ls = t.lessons(); assert.strictEqual(ls.length, 1); assert.strictEqual(ls[0].time, "19:00");
+  assert.ok(!t.G.api_week("2026-11-23").events.some(e => e.start === "18:00"));
+  T("an invitation you deleted (declined) in Google Calendar counts as gone: only the 19:00 class is logged or shown");
+}
+{ // Deleting a class in SideQuest while its event still exists in the calendar
+  const t = env("2026-11-23 09:00"); t.student("rory", "Rory");
+  t.event("rep", "Rory - G12 Maths", "2026-11-24 18:00", 60); t.event("rep", "Rory - G12 Maths", "2026-12-01 18:00", 60);
+  t.to("2026-11-24 19:05").sync();
+  t.G.api_deleteLesson(t.lessons()[0].id);
+  t.to("2026-11-24 19:30").sync(); t.to("2026-11-25 10:00").sync();
+  assert.strictEqual(t.lessons().length, 0, "it doesn't come back");
+  t.to("2026-12-01 19:05").sync();
+  assert.strictEqual(t.lessons().length, 1, "next week's class in the same series is still logged");
+  T("deleting a calendar class in SideQuest: it doesn't come back on the next sync, and the rest of the series still works");
+}
+{ // Your Wednesday: "this and following events" on a repeating event gives Google a new event id
+  const t = env("2026-11-23 09:00"); t.student("rory", "Rory");
+  const a = t.event("seriesA", "IE7701 - Rory - G12 Maths", "2026-11-25 19:00", 60);
+  t.to("2026-11-25 20:05").sync();
+  const l = t.lessons()[0]; t.G.api_save("lessons", l.id, { ...l, topic: "Lines", notes: "Good class" });
+  t.del(a); t.event("seriesA_R20261124T180000", "IE7701 - Rory - G12 Maths", "2026-11-25 18:00", 60); // the split series (Google reports the old 6 PM)
+  const d = t.to("2026-11-27 20:10").sync();
+  const wed = t.lessons().filter(x => x.date === "2026-11-25");
+  assert.strictEqual(wed.length, 1, "no second class"); assert.strictEqual(wed[0].time, "19:00", "your written-up 7 PM class stays as it is");
+  assert.strictEqual(wed[0].eventId, "seriesA_R20261124T180000@2026-11-25"); assert.strictEqual(d.calendar.orphans.length, 0);
+  T("Google changes an event's id (repeating event split): your written-up class is re-attached, nothing logged twice, nothing to ask");
+}
+{ // The state your Sheet is in now: a kept 7 PM class and an untouched 6 PM duplicate for the same day
+  const t = env("2026-11-23 09:00"); t.student("rory", "Rory");
+  t.event("split", "IE7701 - Rory - G12 Maths", "2026-11-25 18:00", 60);
+  t.G.api_save("lessons", "kept7", { id: "kept7", date: "2026-11-25", time: "19:00", studentId: "rory", kind: "class", hours: 1, rate: 35, number: 7, topic: "Lines", eventId: "kept", source: "calendar" });
+  t.G.api_save("lessons", "dup6", { id: "dup6", date: "2026-11-25", time: "18:00", studentId: "rory", kind: "class", hours: 1, rate: 35, number: 10, eventId: "split@2026-11-25", source: "calendar" });
+  t.event("fri", "IE7701 - Rory - G12 Maths", "2026-11-27 18:00", 60);
+  t.G.api_save("lessons", "fri9", { id: "fri9", date: "2026-11-27", time: "18:00", studentId: "rory", kind: "class", hours: 1, rate: 35, number: 9, eventId: "fri@2026-11-27", source: "calendar" });
+  t.to("2026-11-27 20:30").sync();
+  const wed = t.lessons().filter(x => x.date === "2026-11-25");
+  assert.strictEqual(wed.length, 1); assert.strictEqual(wed[0].id, "kept7"); assert.strictEqual(wed[0].eventId, "split@2026-11-25");
+  assert.strictEqual(+t.lessons().find(x => x.id === "fri9").number, 8, "Friday closes the gap: 9 → 8");
+  T("your current Wednesday is repaired on the next sync: the 6 PM duplicate goes, the 7 PM class stays and is re-linked, and Friday becomes lesson 8 again");
+}
+{ // Two separate classes with one student on one day are never merged
+  const t = env("2026-11-23 09:00"); t.student("rory", "Rory");
+  t.G.api_save("lessons", "am", { id: "am", date: "2026-11-25", time: "10:00", studentId: "rory", kind: "class", hours: 1, rate: 35, number: 1, topic: "x", eventId: "kept", source: "calendar" });
+  t.event("pm", "Rory - G12 Maths", "2026-11-25 18:00", 60);
+  t.to("2026-11-25 19:05").sync();
+  assert.strictEqual(t.lessons().length, 2); T("a morning and an evening class with the same student stay two separate classes");
 }
 console.log("all calendar scenarios pass");

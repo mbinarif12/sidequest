@@ -32,6 +32,7 @@ const pretendServer = `<script>(function () {
     api_save: (col, id, data) => { const a = STATE[col] = STATE[col] || []; const i = a.findIndex(x => x.id === id); i >= 0 ? a.splice(i, 1, { ...data, id }) : a.push({ ...data, id }); return true; },
     api_remove: (col, id) => { STATE[col] = (STATE[col] || []).filter(x => x.id !== id); return true; },
     api_tagEvent: t => { STATE.eventtags = STATE.eventtags.filter(x => x.series !== t.series); if (t.tag) STATE.eventtags.push({ id: "tag-" + Math.random(), ...t }); return all(); },
+    api_deleteLesson: id => { STATE.lessons = STATE.lessons.filter(x => x.id !== id); return all(); },
     api_addEvent: x => { if (x.type === "class" && !x.studentId) throw new Error("Pick the student for this class."); return all(); },
     api_runNow: () => ({ results: [{ subject: "Weekly wages", result: "Checked" }], data: all() }),
     api_readSlipPdf: () => ({ read: true, payDate: "2026-11-30", periodStart: "2026-10-26", periodEnd: "2026-11-29", gross: 500, net: 490, paye: 0, usc: 10, pdfUrl: "https://drive.google.com/x", pdfText: "x" }),

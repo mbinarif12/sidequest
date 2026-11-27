@@ -865,7 +865,15 @@ document.addEventListener("click", async e => {
     const r = collectPanel(); if (!r) return;
     sel = null; panelKind = null; dlg().close(); await save("lessons", r.id, r.data); return toast("Saved");
   }
-  if (a === "dellesson") { if (!armDelete(t, a + D.lid)) return; sel = null; dlg().close(); await remove("lessons", D.lid); return toast("Deleted"); }
+  if (a === "dellesson") {
+    if (!armDelete(t, a + D.lid)) return; sel = null; dlg().close();
+    const l = S.lessons.find(x => x.id === D.lid);
+    if (l && String(l.eventId || "").includes("@")) { // from the calendar: remember this day didn't happen, so it isn't logged again
+      try { applyAll(await gs("api_deleteLesson", D.lid)); await loadWeek(weekStart, true); render(); return toast("Deleted. It won't come back from your calendar."); }
+      catch (e) { return toast("Couldn't delete: " + (e.message || e)); }
+    }
+    await remove("lessons", D.lid); return toast("Deleted");
+  }
   if (a === "student") return studentDlg(stu(D.sid) || {});
   if (a === "newstu") return studentDlg({ active: true });
   if (a === "savestu") {

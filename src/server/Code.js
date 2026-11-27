@@ -258,7 +258,7 @@ function api_week(mondayISO) {
   if (!cal) return { error: "no-calendar", events: [] };
   const students = readRows_("Students"), tags = readRows_("EventTags");
   const a = new Date(mondayISO + "T00:00:00"), b = new Date(a.getTime() + 7 * 864e5 + 3 * 36e5);
-  const events = cal.getEvents(new Date(a.getTime() - 3 * 36e5), b).map(ev => {
+  const events = cal.getEvents(new Date(a.getTime() - 3 * 36e5), b).filter(ev => !declined_(ev)).map(ev => {
     const cls = ev.isAllDayEvent() ? { s: null, kind: "" } : classify_(ev, students, tags), s = cls.s;
     const date = Utilities.formatDate(ev.getStartTime(), TZ, "yyyy-MM-dd");
     return { key: ev.getId() + "@" + date, title: ev.getTitle(), allDay: ev.isAllDayEvent(), date,
@@ -275,6 +275,17 @@ function api_tagEvent(t) {
     const old = readRows_("EventTags").filter(x => x.series === t.series || (t.title && String(x.title).trim().toLowerCase() === String(t.title).trim().toLowerCase()));
     old.forEach(x => delete_("EventTags", x.id));
     if (t.tag) upsert_("EventTags", { id: "tag-" + Utilities.getUuid().slice(0, 8), series: t.series || "", title: t.title || "", tag: t.tag, studentId: t.studentId || "", at: new Date().toISOString() });
+  });
+  return api_getAll();
+}
+// Delete a class. If it came from a calendar event that still exists, remember that this day didn't happen,
+// so the next sync doesn't log it again.
+function api_deleteLesson(id) {
+  withLock_(() => {
+    const l = readRows_("Lessons").find(x => x.id === id); if (!l) return;
+    if (l.eventId && String(l.eventId).indexOf("@") > 0)
+      upsert_("EventTags", { id: "tag-" + Utilities.getUuid().slice(0, 8), series: l.eventId, title: "", tag: "ignore", studentId: "", at: new Date().toISOString() });
+    delete_("Lessons", id);
   });
   return api_getAll();
 }
@@ -350,10 +361,15 @@ function workKind_(title) {
   return "";
 }
 
-// What you told SideQuest an event is (by event, which covers a repeating series, or by its exact title)
+// An invitation you deleted in Google Calendar isn't really gone: it's kept as "declined". Treat it as gone.
+function declined_(ev) {
+  try { return !!ev.getMyStatus && String(ev.getMyStatus()) === String(CalendarApp.GuestStatus.NO); } catch (e) { return false; }
+}
+// What you told SideQuest an event is: for this one day (e.g. a class you deleted in SideQuest), for the event and its repeats,
+// or for any event with exactly this title
 function tagFor_(ev, tags) {
-  const id = ev.getId(), t = String(ev.getTitle() || "").trim().toLowerCase();
-  return tags.find(x => x.series === id) || tags.find(x => x.title && String(x.title).trim().toLowerCase() === t) || null;
+  const id = ev.getId(), t = String(ev.getTitle() || "").trim().toLowerCase(), day = id + "@" + Utilities.formatDate(ev.getStartTime(), TZ, "yyyy-MM-dd");
+  return tags.find(x => x.series === day) || tags.find(x => x.series === id) || tags.find(x => x.title && String(x.title).trim().toLowerCase() === t) || null;
 }
 // → { s: student or null, kind: "" (a class) | "demo" | "meeting" | "reports", ignore: true for "not teaching" }
 function classify_(ev, students, tags) {
@@ -386,7 +402,7 @@ function syncCalendar_() {
   const students = readRows_("Students"), lessons = readRows_("Lessons"), tags = readRows_("EventTags");
   const seenTitle = {}, liveKeys = {};
   let events;
-  try { events = cal.getEvents(start, end); } catch (e) { out.error = "Couldn't read your calendar: " + e.message; return out; }
+  try { events = cal.getEvents(start, end).filter(ev => !declined_(ev)); } catch (e) { out.error = "Couldn't read your calendar: " + e.message; return out; }
   // Classes logged from the calendar whose event has since been deleted or moved (to another time or day).
   // Ones SideQuest logged by itself and you never touched simply go (before anything new is logged, so lesson numbers stay right):
   // the moved event is logged again in its new place. Ones you wrote notes for stay, and you're asked what happened.
@@ -397,8 +413,8 @@ function syncCalendar_() {
   const untouched = l => l.source === "calendar" && !l.topic && !l.notes && !l.homework && !l.followups && l.kind !== "noshow";
   // Safety: if lots vanish at once (e.g. you switched calendars), don't delete anything, just ask
   const auto = gone.filter(untouched), safe = auto.length <= 5 && auto.length <= Math.max(2, lessons.length * 0.2);
-  if (safe) auto.forEach(l => { delete_("Lessons", l.id); lessons.splice(lessons.indexOf(l), 1); out.removed++; });
-  out.orphans = gone.filter(l => !(safe && untouched(l))).map(l => l.id);
+  const renumber = {}; // students whose lesson numbers may need closing up after a removal
+  if (safe) auto.forEach(l => { delete_("Lessons", l.id); lessons.splice(lessons.indexOf(l), 1); out.removed++; renumber[l.studentId] = 1; });
   events.forEach(ev => {
     if (ev.isAllDayEvent()) return;
     const title = ev.getTitle(), cls = classify_(ev, students, tags), s = cls.s, kind = cls.kind;
@@ -417,7 +433,17 @@ function syncCalendar_() {
     const time = Utilities.formatDate(ev.getStartTime(), TZ, "HH:mm");
     const hours = Math.round((ev.getEndTime() - ev.getStartTime()) / 9e5) / 4 || s.hours || 1;
     const sameEvent = l => l.eventId === key || (l.eventId && l.eventId.indexOf(ev.getId() + "@") === 0 && l.date === date) || (l.eventId === ev.getId() && l.date === date);
-    const linked = lessons.find(sameEvent) || lessons.find(l => !l.eventId && l.studentId === s.id && l.date === date && l.kind !== "cancelled");
+    let linked = lessons.find(sameEvent) || lessons.find(l => !l.eventId && l.studentId === s.id && l.date === date && l.kind !== "cancelled");
+    // Google sometimes gives an event a new id (e.g. "this and following events" on a repeating event splits the series).
+    // Then the class you already have for this student and day lost its link: re-attach it instead of logging a second one,
+    // and drop an untouched duplicate that an earlier sync made.
+    const mins = t => { const m = String(t || "").match(/^(\d{1,2}):(\d{2})/); return m ? +m[1] * 60 + +m[2] : null; };
+    const near = l => mins(l.time) == null || Math.abs(mins(l.time) - mins(time)) <= 180; // never merge two separate classes on one day
+    const adopt = lessons.find(l => l !== linked && l.studentId === s.id && l.date === date && l.kind !== "cancelled" && l.eventId && (l.eventId === "kept" || !isLive(l)) && near(l));
+    if (adopt) {
+      if (linked && untouched(linked)) { delete_("Lessons", linked.id); lessons.splice(lessons.indexOf(linked), 1); out.removed++; renumber[s.id] = 1; linked = null; }
+      if (!linked) { const upd = { ...adopt, eventId: key }; upsert_("Lessons", upd); Object.assign(adopt, upd); linked = adopt; out.updated++; }
+    }
     if (ev.getStartTime() > now) {
       out.planned.push({ eventId: key, studentId: s.id, date, time, hours, start: ev.getStartTime().toISOString(), title, lessonId: linked ? linked.id : "" });
       return;
@@ -445,6 +471,16 @@ function syncCalendar_() {
     upsert_("Lessons", l); lessons.push(l); out.created++;
   });
   out.planned.sort((a, b) => a.start.localeCompare(b.start));
+  // After a removal, later classes SideQuest logged by itself (and you haven't written up) close the gap: 7, 9 → 7, 8
+  Object.keys(renumber).forEach(sid => {
+    let prev = null;
+    lessons.filter(l => l.studentId === sid && l.kind === "class").sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || ""))).forEach(l => {
+      if (prev != null && untouched(l) && +l.number !== prev + 1 && +l.number > prev) { const upd = { ...l, number: prev + 1 }; upsert_("Lessons", upd); Object.assign(l, upd); }
+      if (l.number !== "" && l.number != null && !isNaN(+l.number)) prev = +l.number;
+    });
+  });
+  // Classes whose event is still gone (and that weren't removed or re-attached above): ask what happened
+  out.orphans = gone.filter(l => lessons.indexOf(l) >= 0 && l.eventId && l.eventId !== "kept" && !isLive(l)).map(l => l.id);
   return out;
 }
 // A trial, meeting or reports event: planned until it ends, then logged as other work (on the claim straight away).
