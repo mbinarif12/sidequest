@@ -888,7 +888,10 @@ document.addEventListener("click", async e => {
     const data = { ...strip(old), name: dv("s_n"), subject: dv("s_sub"), calKeyword: dv("s_k") || dv("s_n"), code: dv("s_c").toUpperCase(), hours: dn("s_h") ?? 1, ownRate: dn("s_r"), pkgSize: dn("s_p"), notes: dv("s_notes"), active: $("#s_a").checked, priorCount: old.priorCount || 0 };
     const sid = D.sid || "s-" + uid(), pt = pendingTag; pendingTag = null; dlg().close(); await save("students", sid, data);
     if (pt && !D.sid) return sendTag({ ...pt, tag: "student", studentId: sid });
-    toast("Saved. Calendar changes show next time the page loads."); return;
+    // Re-check the calendar right away, so their classes (and any "not linked" events) update without reloading
+    toast("Saved. Updating your calendar…");
+    try { applyAll(await gs("api_sync")); await loadWeek(weekStart, true); render(); toast("Saved"); } catch (e) { toast("Saved. Press Sync calendar to update the calendar."); }
+    return;
   }
   if (a === "delstu") { if (!armDelete(t, a + D.sid)) return; dlg().close(); return remove("students", D.sid); }
   if (a === "todo" && D.t === "slip") { const sl = S.payslips.find(x => x.id === D.pid); view = "payslips"; selPeriod = sl && sl.periodEnd ? (periods().find(p => p.end === sl.periodEnd) || {}).key || selPeriod : selPeriod; render(); return scrollTo(0, 0); }
