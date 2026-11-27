@@ -149,6 +149,11 @@ assert.strictEqual(tds.length, 1); T(`300 copies of a repeated to-do are cleaned
   assert.ok(items.length && items.every(i => i.key), "every flag has a key"); assert.strictEqual(items[0].key, "L:9|2026-11-07|13:30|IE999");
   T("every pay flag has a stable key, so an override stays attached to it");
 }
+{ // Text that looks like a formula is stored as text and read back unchanged
+  G.api_save("todos", "f1", { id: "f1", text: '=IMPORTXML("http://example.com","//a")', done: false, createdAt: "2026-11-01" });
+  assert.strictEqual(G.readRows_("Todos").find(x => x.id === "f1").text, '=IMPORTXML("http://example.com","//a")');
+  T("text starting with \"=\" (e.g. from an email) is kept as text, never run as a Sheet formula, and reads back unchanged");
+}
 const P = G.L.buildPeriods("2026-09-01", "2026-11-20", [{ periodStart: "2026-08-31", periodEnd: "2026-09-27" }, { periodStart: "2026-09-28", periodEnd: "2026-11-01" }]);
 assert.strictEqual(P.find(p => p.name === "October").weeks, 5); assert.strictEqual(P.find(p => p.name === "November").start, "2026-11-02"); T("pay periods: a 5-week payslip moves the boundary, the rest follow");
 assert.strictEqual(G.L.periodFor("2026-10-31").name, "November"); T("pay periods: a week counts in the month its Sunday falls in");

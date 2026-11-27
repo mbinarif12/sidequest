@@ -13,6 +13,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - run: node --check src/web/app.js && node --check src/server/Code.js && node --check src/shared/logic.js
       - run: node scripts/build.mjs
       - run: node test/server.test.js
       - run: node test/calendar.test.js

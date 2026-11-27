@@ -9,7 +9,7 @@ function watchSearch() {
   if (!running && searchPoll) { clearInterval(searchPoll); searchPoll = null; }
   if (searchWasRunning && !running) {
     if (/^error/.test(STATUS.oldSearch)) toast("The payslip search stopped: " + STATUS.oldSearch.split("|").slice(2).join("|"), 10000);
-    else { let r = {}; try { r = JSON.parse(STATUS.oldSearchResult || "{}"); } catch (e) {} toast(r.found ? `Payslip search done. Found ${r.found} payslip PDF${r.found > 1 ? "s" : ""}.${r.months && r.months.length ? " Added: " + r.months.join(", ") + "." : ""}${r.already && r.already.length ? " Already had: " + r.already.join(", ") + "." : ""}` : "Payslip search done: no payslip PDFs found in this Gmail account.", 12000); }
+    else { let r = {}; try { r = JSON.parse(STATUS.oldSearchResult || "{}"); } catch (e) {} toast(r.found ? `Payslip search done. Found ${r.found} payslip PDF${r.found > 1 ? "s" : ""}.${r.months && r.months.length ? " Added: " + r.months.join(", ") + "." : ""}${r.already && r.already.length ? " Already had: " + [...new Set(r.already)].join(", ") + "." : ""}` : "Payslip search done: no payslip PDFs found in this Gmail account.", 12000); }
   }
   searchWasRunning = running;
 }
@@ -514,9 +514,13 @@ function searchLine() {
   let r = {}; try { r = JSON.parse(STATUS.oldSearchResult || "{}"); } catch (e) {}
   // Months whose pay date (around the 15th of the next month) has passed but still have no payslip PDF
   const paydayPassed = x => { const d = new Date(x.end + "T12:00:00"); return new Date(d.getFullYear(), d.getMonth() + 1, 20).toISOString().slice(0, 10) <= TODAY; };
-  const missing = r.partial ? [] : periods().filter(x => paydayPassed(x) && !(x.slip && x.slip.pdfUrl)).map(x => x.name + (x.year !== +TODAY.slice(0, 4) ? " " + x.year : ""));
-  const miss = missing.length ? `<div class="note warn">${ICON.alert}<span>No payslip email found in Gmail for: <b>${esc(missing.join(", "))}</b>. If it came another way (WhatsApp, paper), press <b>Add payslip</b> and upload the PDF.</span></div>` : "";
-  return miss + `<div class="note soft">Last payslip search (${when}): ${r.found ? `found ${r.found} payslip PDF${r.found > 1 ? "s" : ""}.${r.months && r.months.length ? " Added: " + esc(r.months.join(", ")) + "." : ""}${r.already && r.already.length ? " Already had: " + esc(r.already.join(", ")) + "." : ""}` : `checked ${r.emails || 0} emails, none had a payslip PDF.`}${r.problems && r.problems.length ? " Couldn't read: " + esc(r.problems.join("; ")) : ""}</div>`;
+  // Months whose pay date has passed: no payslip at all (amber), or a payslip typed in by hand with no PDF kept (just a note)
+  const nm = x => x.name + (x.year !== +TODAY.slice(0, 4) ? " " + x.year : "");
+  const due = r.partial ? [] : periods().filter(paydayPassed);
+  const missing = due.filter(x => !x.slip).map(nm), nopdf = due.filter(x => x.slip && !x.slip.pdfUrl).map(nm);
+  const miss = (missing.length ? `<div class="note warn">${ICON.alert}<span>No payslip found for: <b>${esc(missing.join(", "))}</b>. If it came another way (WhatsApp, paper), press <b>Add payslip</b> and upload the PDF.</span></div>` : "")
+    + (nopdf.length ? `<div class="note soft">${ICON.doc || ""}<span>${esc(nopdf.join(", "))}: entered by hand, no PDF saved. To keep a copy, open it, press <b>Edit</b> and upload the PDF.</span></div>` : "");
+  return miss + `<div class="note soft">Last payslip search (${when}): ${r.found ? `found ${r.found} payslip PDF${r.found > 1 ? "s" : ""}.${r.months && r.months.length ? " Added: " + esc(r.months.join(", ")) + "." : ""}${r.already && r.already.length ? " Already had: " + esc([...new Set(r.already)].join(", ")) + "." : ""}` : `checked ${r.emails || 0} emails, none had a payslip PDF.`}${r.problems && r.problems.length ? " Couldn't read: " + esc(r.problems.join("; ")) : ""}</div>`;
 }
 function vPayslips() {
   const ps = periods().slice().reverse();
@@ -559,7 +563,7 @@ function slipPanel(p) {
     ${line("Arrived", s.receivedDate ? fmtD(s.receivedDate) : `<button class="btn small-b" data-act="received" data-pid="${s.id}">Mark received</button>`)}
     ${s.cumulativeGross != null ? line("Year to date (gross)", eur(s.cumulativeGross)) : ""}
     ${match}
-    <div class="acts">${s.pdfUrl ? `<a class="btn grow" href="${esc(s.pdfUrl)}" target="_blank" rel="noopener">Open payslip PDF</a>` : ""}<button class="btn ghost" data-act="editslip" data-pid="${s.id}">Edit</button></div>`;
+    <div class="acts">${/^https:\/\//i.test(s.pdfUrl || "") ? `<a class="btn grow" href="${esc(s.pdfUrl)}" target="_blank" rel="noopener">Open payslip PDF</a>` : ""}<button class="btn ghost" data-act="editslip" data-pid="${s.id}">Edit</button></div>`;
 }
 
 
@@ -680,7 +684,9 @@ function guessFromTitle(t) {
     .replace(/[–—\-\/|:·()]+/g, " ").replace(/\s+/g, " ").trim().split(" ").slice(0, 2).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
   return { code, name, subject: [grade, subject].filter(Boolean).join(" ") };
 }
+let tagCloseHooked = false;
 function tagDlg(series, title) {
+  if (!tagCloseHooked) { tagCloseHooked = true; dlg().addEventListener("close", () => { if (!/s_n/.test(dlg().innerHTML)) return; setTimeout(() => { if (!dlg().open) pendingTag = null; }, 0); }); }
   const cur = (S.eventtags || []).find(x => x.series === series) || (S.eventtags || []).find(x => x.title && x.title.trim().toLowerCase() === title.trim().toLowerCase());
   const opts = S.students.filter(s => s.active).sort((a, b) => a.name.localeCompare(b.name)).map(s => `<option value="${s.id}" ${cur && cur.studentId === s.id ? "selected" : ""}>${esc(s.name)} · ${esc(s.subject)}</option>`).join("");
   openDlg(`<span class="eyebrow">Calendar event</span><h2>${esc(title)}</h2>
@@ -829,7 +835,7 @@ document.addEventListener("click", async e => {
     const x = { type: D.k, studentId: $("#ae_s") ? $("#ae_s").value : "", name: $("#ae_name") ? dv("ae_name") : "", subject: $("#ae_sub") ? dv("ae_sub") : "", date: dv("ae_d"), time: dv("ae_t"), minutes: dn("ae_m") };
     if (x.type === "class" && !x.studentId) return toast("Choose the student.");
     if (!x.date || !x.time) return toast("Pick a date and a start time.");
-    if (x.date < TODAY) return toast("That date has passed. Use Log past work for things already done.");
+    if (x.date < TODAY || Date.parse(x.date + "T" + x.time + ":00") < nowMs()) return toast("That time has passed. Use Log past work for things already done.");
     t.disabled = true; t.textContent = "Adding…";
     try { applyAll(await gs("api_addEvent", x)); dlg().close(); weekStart = L.mondayOf(x.date); await loadWeek(weekStart, true); render(); toast("Added to your Google Calendar"); }
     catch (e) { t.disabled = false; t.textContent = "Add to Google Calendar"; toast(e.message || String(e)); }
@@ -880,9 +886,9 @@ document.addEventListener("click", async e => {
     if (!dv("s_n")) return toast("Add a name.");
     const old = stu(D.sid) || {};
     const data = { ...strip(old), name: dv("s_n"), subject: dv("s_sub"), calKeyword: dv("s_k") || dv("s_n"), code: dv("s_c").toUpperCase(), hours: dn("s_h") ?? 1, ownRate: dn("s_r"), pkgSize: dn("s_p"), notes: dv("s_notes"), active: $("#s_a").checked, priorCount: old.priorCount || 0 };
-    const sid = D.sid || "s-" + uid(); dlg().close(); await save("students", sid, data);
-    if (pendingTag && !D.sid) { const t = { ...pendingTag, tag: "student", studentId: sid }; pendingTag = null; return sendTag(t); }
-    pendingTag = null; toast("Saved. Calendar changes show next time the page loads."); return;
+    const sid = D.sid || "s-" + uid(), pt = pendingTag; pendingTag = null; dlg().close(); await save("students", sid, data);
+    if (pt && !D.sid) return sendTag({ ...pt, tag: "student", studentId: sid });
+    toast("Saved. Calendar changes show next time the page loads."); return;
   }
   if (a === "delstu") { if (!armDelete(t, a + D.sid)) return; dlg().close(); return remove("students", D.sid); }
   if (a === "todo" && D.t === "slip") { const sl = S.payslips.find(x => x.id === D.pid); view = "payslips"; selPeriod = sl && sl.periodEnd ? (periods().find(p => p.end === sl.periodEnd) || {}).key || selPeriod : selPeriod; render(); return scrollTo(0, 0); }
@@ -947,7 +953,7 @@ document.addEventListener("click", async e => {
   if (a === "saveslip") {
     if (!dv("q_ps") || !dv("q_pe") || dn("q_g") == null) return toast("Fill in the dates it covers and the gross pay.");
     const old = S.payslips.find(x => x.id === D.pid) || { source: "manual" };
-    const data = { ...strip(old), periodStart: dv("q_ps"), periodEnd: dv("q_pe"), payDate: dv("q_d"), gross: dn("q_g"), net: dn("q_n"), paye: dn("q_paye"), usc: dn("q_usc"), cumulativeGross: dn("q_cum"), receivedDate: dv("q_rec"), pdfUrl: (dv("q_pdf") || "").trim(), needsCheck: false, ...(slipText && slipText.pid === (D.pid || "") ? { pdfText: slipText.text } : {}) };
+    const data = { ...strip(old), periodStart: dv("q_ps"), periodEnd: dv("q_pe"), payDate: dv("q_d"), gross: dn("q_g"), net: dn("q_n"), paye: dn("q_paye"), usc: dn("q_usc"), cumulativeGross: dn("q_cum"), receivedDate: dv("q_rec"), pdfUrl: /^https:\/\//i.test((dv("q_pdf") || "").trim()) ? dv("q_pdf").trim() : "", needsCheck: false, ...(slipText && slipText.pid === (D.pid || "") ? { pdfText: slipText.text } : {}) };
     slipText = null; dlg().close(); await save("payslips", D.pid || "slip-" + uid(), data); return toast("Payslip saved");
   }
   if (a === "delslip") { if (!armDelete(t, a + D.pid)) return; dlg().close(); return remove("payslips", D.pid); }

@@ -31,6 +31,14 @@ const T = s => console.log("✓ " + s);
     T("unknown class (IE901 - Orla G11) → Add student, pre-filled from the title (Orla, IE901, G11 Maths) → the event is linked to her");
     await pg.close();
 
+    pg = await open("Calendar"); // cancelling "new student" must not link the next, unrelated student to that event
+    await pg.locator(".ev.unk").first().click(); await pg.waitForSelector("dialog[open] .tagopts");
+    await pg.click("dialog[open] [data-act=tagnew]"); await pg.waitForTimeout(100); await pg.keyboard.press("Escape"); await pg.waitForTimeout(100);
+    await pg.click("nav >> text=Students"); await pg.waitForTimeout(150); await pg.click("[data-act=newstu]"); await pg.waitForTimeout(100);
+    await pg.fill("#s_n", "Someone Else"); await pg.click("dialog[open] [data-act=savestu]"); await pg.waitForTimeout(250);
+    assert.strictEqual((await calls(pg, "api_tagEvent")).length, 0); T("cancelling \"new student\" from an event doesn't link the next student you add");
+    await pg.close();
+
     pg = await open("Calendar");
     await pg.locator(".ev.unk").first().click(); await pg.waitForSelector("dialog[open] .tagopts");
     await pg.click("dialog[open] [data-act=tagset][data-tag=student]"); await pg.waitForTimeout(100);
@@ -61,7 +69,10 @@ const T = s => console.log("✓ " + s);
     await pg.click("dialog[open] [data-act=addevsave]"); await pg.waitForTimeout(100);
     assert.match(await toastText(pg), /Choose the student/); T("+ Add to calendar: a class needs a student");
     await pg.selectOption("#ae_s", { index: 1 }); await pg.fill("#ae_d", "2026-11-01"); await pg.click("dialog[open] [data-act=addevsave]"); await pg.waitForTimeout(100);
-    assert.match(await toastText(pg), /passed/); T("…a date that has passed is refused, pointing to Log past work");
+    assert.match(await toastText(pg), /passed/);
+    await pg.fill("#ae_d", "2026-11-06"); await pg.fill("#ae_t", "09:00"); await pg.click("dialog[open] [data-act=addevsave]"); await pg.waitForTimeout(100);
+    assert.match(await toastText(pg), /passed/); assert.strictEqual((await calls(pg, "api_addEvent")).length, 0);
+    T("…a date or time that has passed (even earlier today) is refused, pointing to Log past work");
     await pg.fill("#ae_d", "2026-11-20"); await pg.fill("#ae_t", "17:00"); await pg.click("dialog[open] [data-act=addevsave]"); await pg.waitForTimeout(300);
     let add = (await calls(pg, "api_addEvent"))[0][0];
     assert.strictEqual(add.type, "class"); assert.ok(add.studentId); assert.strictEqual(add.date, "2026-11-20"); assert.strictEqual(add.time, "17:00");

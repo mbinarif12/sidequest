@@ -162,6 +162,7 @@ function readRows_(name) {
   });
 }
 function fromCell_(h, v) {
+  if (typeof v === "string" && v.indexOf("'=") === 0) v = v.slice(1); // stored as text on purpose (see toCell_)
   if (v instanceof Date) return Utilities.formatDate(v, TZ, h === "time" ? "HH:mm" : h === "updatedAt" || h === "savedAt" ? "yyyy-MM-dd'T'HH:mm:ss" : "yyyy-MM-dd");
   if (NUM.includes(h)) return v === "" || v == null ? null : Number(v);
   if (BOOL.includes(h)) return v === true || String(v).toLowerCase() === "true";
@@ -172,7 +173,9 @@ function toCell_(h, v) {
   if (v == null) return "";
   if (JSONF.includes(h)) return JSON.stringify(v);
   if (BOOL.includes(h)) return v ? "TRUE" : "FALSE";
-  return String(v).slice(0, 49000);
+  const t = String(v).slice(0, 49000);
+  // Text from emails or calendar titles that starts with "=" must stay text, never become a Sheet formula
+  return /^=/.test(t) ? "'" + t : t;
 }
 function upsert_(name, obj) {
   const sh = sheet_(name), head = headWithNew_(sh, name);
